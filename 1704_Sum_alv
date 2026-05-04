@@ -1,0 +1,2355 @@
+Here i have added some extra points like calculation in the existing alv and added some code for this .
+for in i have added , and filtered some data.
+
+
+REPORT zbackorder.
+
+INCLUDE zbacktop.
+
+TYPES BEGIN OF t_data_merge.
+        INCLUDE STRUCTURE v03rb.
+TYPES:  mandt    TYPE vbap-mandt,
+        mtvfp    TYPE vbap-mtvfp,
+        sumbd    TYPE vbap-sumbd,
+        plavo    TYPE vbap-plavo,
+        sobkz    TYPE vbap-sobkz,
+        uepos    TYPE vbap-uepos,
+        prosa    TYPE vbap-prosa,
+        kzfme    TYPE vbap-kzfme,
+        sgt_rcat TYPE vbap-sgt_rcat,
+        opnpr    TYPE vbap-netwr, "Open Quantity Amount
+        rfsta    TYPE vbup-rfsta,
+        rfgsa    TYPE vbup-rfgsa,
+        lfsta    TYPE vbup-lfsta,
+        lfgsa    TYPE vbup-lfgsa,
+        absta    TYPE vbup-absta,
+        uvall    TYPE vbup-uvall,
+        abdis    TYPE vbak-abdis,
+        bdart    TYPE vbep-bdart,
+        plart    TYPE vbep-plart,
+        mbdat    TYPE vbep-mbdat,
+        edatu    TYPE vbep-edatu,
+        cmeng    TYPE vbep-cmeng,
+        abart    TYPE vbep-abart,
+        bmeng    TYPE vbep-bmeng,
+        lmeng    TYPE vbep-lmeng,
+        wmeng    TYPE vbep-wmeng,
+        lifsp    TYPE vbep-lifsp,
+        lfrel    TYPE vbep-lfrel.
+TYPES  END OF t_data_merge.
+
+TYPES  tt_data_merge TYPE SORTED TABLE OF t_data_merge WITH UNIQUE KEY vbeln posnr etenr.
+
+TYPES: BEGIN OF ty_s_field_len,
+         fieldname TYPE slis_fieldcat_alv-fieldname,
+         outputlen TYPE slis_fieldcat_alv-outputlen,
+       END OF ty_s_field_len,
+       ty_t_field_len TYPE TABLE OF ty_s_field_len.
+
+
+DATA: fieldcatalog TYPE slis_t_fieldcat_alv WITH HEADER LINE,
+      gd_layout    TYPE slis_layout_alv,
+      gt_field_len TYPE ty_t_field_len,
+      gd_repid     LIKE sy-repid,
+      g_save       TYPE c VALUE 'X',
+      g_variant    TYPE disvariant,
+      gx_variant   TYPE disvariant,
+      g_exit       TYPE c.
+
+DATA : len TYPE i.
+DATA : p_parvw_sh TYPE char2,
+       p_parvw_we TYPE char2.
+
+*SELECTION-SCREEN COMMENT 1(79) TEXT-200.
+SELECT-OPTIONS: s_matnr FOR  vapma-matnr MATCHCODE OBJECT mat1,
+                s_werks FOR  vapma-werks.
+SELECTION-SCREEN SKIP 2.
+SELECTION-SCREEN COMMENT 1(79) text-210.
+SELECT-OPTIONS: s_kunnr FOR  vapma-kunnr MATCHCODE OBJECT debi,
+                s_party FOR  vapma-kunnr MATCHCODE OBJECT debi,
+                s_bstnk FOR  vapma-bstnk,
+                s_vbeln FOR  vapma-vbeln MATCHCODE OBJECT vmva,
+                s_firdt FOR  sy-datum.
+PARAMETERS :    p_ernam LIKE vapma-ernam.
+*SELECT-OPTIONS: s_creon FOR vbak-erzet. "comented by samim
+SELECT-OPTIONS: s_creon FOR vbak-erdat. " added by Samim
+
+SELECTION-SCREEN SKIP 2.
+SELECTION-SCREEN COMMENT 1(79) text-220.
+PARAMETERS:     p_vkorg LIKE vapma-vkorg MEMORY ID vko,
+                p_vtweg LIKE vapma-vtweg MEMORY ID vtw,
+                p_spart LIKE vapma-spart MEMORY ID spa,
+                p_vkbur LIKE vapma-vkbur MEMORY ID vkb,
+                p_vkgrp LIKE vapma-vkgrp MEMORY ID vkg.
+
+INITIALIZATION.
+  APPEND VALUE #( sign   = 'I' option = 'LT' low = sy-datum ) TO s_firdt.
+
+
+START-OF-SELECTION.
+
+  PERFORM v03rb_fuellen.
+
+END-OF-SELECTION.
+
+  PERFORM build_field_catalog.
+  PERFORM build_layout.
+  PERFORM display_alv.
+
+  INCLUDE zbackorder_include.
+======================================================================
+*&---------------------------------------------------------------------*
+*&  Include           ZBACKTOP
+*&---------------------------------------------------------------------*
+TABLES:  v03rb,                        " Listanzeige
+         vbak,                         " Verkaufsbeleg - Kopf
+         vbkd,                         " Verkaufsbeleg - Kaufm. Daten
+         vbap,                         " Verkaufsbeleg - Position
+         vbfa,                         " Verkaufsbeleg - Fluß
+         vbpa,                         " Verkaufsbeleg - Partner
+         vbep,                         " Verkaufsbeleg - Einteilungen
+
+         rsd2x,                                             "
+         kna1,                         " Kundenstamm
+         adrs,                         " Adresse
+         vbadr,                        " Adresse
+         vakpa,                        " Index Partner
+         vapma,                        " Index Material
+         tinpa,                        " Index Partner
+         tvind,                        " Index Material
+         tvagt,                        " Absagegründe
+         tpart,
+         tvkot,
+         tvtwt,
+         tspat,
+         kvbuk,                        " Arbeitsstruktur Belegstatus
+         tstct.                        " Bezeichnung Transaktion
+
+TABLES:
+  dd03p,                        " Tabellenfelder
+  vbuk,                         " Kopfstatusinformation
+  vbup,                         " Positionsstatusinformation
+  vbstt,                        " Statustexte
+  rkaky,                        " Kommunikation FB RK_POPUP_LIST_
+  rv75a,                        " Dynpro-/Arbeitsfelder
+  vbcom,
+  vbco6.
+
+TABLES:  indx.                         " Indx
+
+TABLES:
+  t180b,                        " Summenvarianten
+  t180c,                        " Bez. der Summenvarianten
+  t180g,                        " Erlaubte Summenvarianten
+  t180p,                        " Auswahlfelder
+  t180s,                        " Felder zu Anzeigevarianten
+  t180t,                        " Bezeichnung Anzeigevarianten
+  t180u,                        " Überschriften Anzeigevarianten
+  t180v,                        " Vorschlagswerte f. Anz.Variante
+  t180z,                        " Anzeigevarianten, Zugriffsarten
+  t181t.                        " RV spezifische Texte
+
+
+DATA: BEGIN OF xt180a OCCURS 10.       "Felder der Arbeitsstruktur
+        INCLUDE STRUCTURE t180a.
+DATA: END   OF xt180a.
+
+DATA: BEGIN OF xt180s OCCURS 10.       "Aufbau Zeile
+        INCLUDE STRUCTURE t180s.
+DATA: END   OF xt180s.
+
+DATA: BEGIN OF xt180u OCCURS 10.       "Aufbau Überschriften
+        INCLUDE STRUCTURE t180u.
+DATA: END   OF xt180u.
+
+* ----- Tabelle der aktuellen Summen (im Summiermodus OBEN) ------------
+DATA:    BEGIN OF aktsum OCCURS 100,
+           summary(1) TYPE c,   " Kz.: Eintrag hell ?
+           feld1(40)  TYPE c,   " Fixwert Stufe 1
+           feld2(40)  TYPE c,   " Fixwert Stufe 2
+           feld3(40)  TYPE c,   " Fixwert Stufe 3
+           waerk      LIKE v03rb-waerk,  " Währung Beleg
+           netwr      LIKE v03rb-netwr,  " Nettowert Beleg
+           anzpo(3)   TYPE p,   " Anzahl Posten
+         END   OF aktsum.
+
+* ----- Tabelle der Waehrungen und der Anzahl ihrer Dezimalen ----------
+DATA:    BEGIN OF deztab OCCURS 10,
+           waerk     LIKE v03rb-waerk,    " Waehrung
+           dezim(1)  TYPE n,   " Anzahl Dezimalen
+           faktor(3) TYPE p,   " Faktor (1-1000)
+         END   OF deztab.
+
+
+* ----- Tabelle der naechsten Summen (im SPLIT unten) ------------------
+DATA:    BEGIN OF nxtsum OCCURS 100,
+           feld1(40) TYPE c,   " Wert auf Level 1
+           feld2(40) TYPE c,   " Wert auf Level 2
+           feld3(40) TYPE c,   " Wert auf Level 3
+           waerk     LIKE v03rb-waerk,    " Waehrung
+           anzpo(3)  TYPE p,   " Anzahl Posten
+         END   OF nxtsum.
+
+* ------ Tabelle der Einzelposten  -------------------------------------
+DATA:    BEGIN OF postab OCCURS 200.
+        INCLUDE STRUCTURE v03rb.
+DATA:    END   OF postab.
+
+DATA: BEGIN OF outtab ,
+        matnr        LIKE v03rb-matnr,
+        arktx        LIKE v03rb-arktx,
+        kunnr        LIKE v03rb-kunnr,
+        name1        LIKE kna1-name1,
+        pr_type      TYPE clobjdat-ausp1, "Product Type
+        pr_type_des  TYPE makt-maktx,     "Product Type description
+        geometry     TYPE clobjdat-ausp1, "Geometry
+        line_1_tech  TYPE clobjdat-ausp1, "LINE_1_TECH
+        line_2_sales TYPE clobjdat-ausp1, "LINE_2_SALES
+        type_1_tech  TYPE clobjdat-ausp1, "TYPE_1_TECH
+        type_2_sales TYPE clobjdat-ausp1, "TYPE_2_SALES
+        vbeln        LIKE v03rb-vbeln,
+        posnr        LIKE v03rb-posnr,
+        bstnk        LIKE v03rb-bstnk,   " PO Number
+        lfdat_1      LIKE v03rb-lfdat_1,  " first delivery date
+        kwmeng       LIKE v03rb-kwmeng,
+        kbmeng       LIKE v03rb-kbmeng,
+        olfmng       LIKE v03rb-olfmng,
+        vrkme        LIKE v03rb-vrkme, " sales unit
+        base_uom     TYPE mara-meins,      " <<< NEW: Base unit of measure "samim
+        netwr        LIKE vbap-netwr, "Sales Order Amount
+        opnpr        LIKE vbap-netwr, "Open Quantity Amount
+        waerk        LIKE vbap-waerk, "Currency
+        shipto       LIKE kna1-kunnr,
+        shipnam      TYPE char70,
+        custmat      TYPE kdmat,
+        invqty       TYPE fkimg,
+        labst        TYPE mard-labst,
+      END OF outtab.
+
+DATA outtable LIKE STANDARD TABLE OF outtab
+              INITIAL SIZE 3.
+
+* ----- Tabelle der Summen ---------------------------------------------
+DATA:    BEGIN OF summen OCCURS 100,
+           feld1(40) TYPE c,   " Wert Kriterium 1
+           feld2(40) TYPE c,   " Wert Kriterium 2
+           feld3(40) TYPE c,   " Wert Kriterium 3
+           waerk     LIKE v03rb-waerk,  " Währung Beleg
+           netwr     LIKE v03rb-netwr,  " Nettowert Beleg
+           anzpo(3)  TYPE p,   " Anzahl Posten
+         END   OF summen.
+
+* ------ Gerettete POSTAB beim Wechsel ANZEIGEN-AENDERN (wg. Berecht.)--
+DATA:    BEGIN OF xpostab OCCURS 200.
+        INCLUDE STRUCTURE v03rb.
+DATA:    END   OF xpostab.
+
+* ------ Gerettete POSTAB beim Wechsel Selektieren und F12            --
+DATA:    BEGIN OF ypostab OCCURS 200,
+           lsind LIKE sy-lsind,      " Stufe
+           zaehl LIKE vbvfi-zaehl,   " Indexzaehler JW
+           vbeln LIKE v03rb-vbeln,
+           posnr LIKE v03rb-posnr,
+           etenr LIKE v03rb-etenr,
+           selkz LIKE v03rb-selkz,   " Selektionskennzeichen
+         END   OF ypostab.
+
+DATA:    BEGIN OF zpostab OCCURS 200,
+           lsind LIKE sy-lsind,      " Stufe
+           zaehl LIKE vbvfi-zaehl,   " Indexzaehler JW
+           vbeln LIKE v03rb-vbeln,
+           posnr LIKE v03rb-posnr,
+           etenr LIKE v03rb-etenr,
+           selkz LIKE v03rb-selkz,   " Selektionskennzeichen
+         END   OF zpostab.
+
+* ------ Bearbeitete Belege.                         -------------------
+DATA:    BEGIN OF fpostab OCCURS 50,   "Freigegebene
+           vbeln    LIKE v03rb-vbeln,
+           posnr    LIKE v03rb-posnr,
+           etenr    LIKE v03rb-etenr,
+           vbtyp    LIKE v03rb-vbtyp,
+           function,
+         END   OF fpostab.
+
+*eject
+*-----------------------------------------------------------------------
+*       Teil 2 :  Strukturen    ( BEGIN OF ... )
+*-----------------------------------------------------------------------
+
+* ------ Schluessel fuer INDX ------------------------------------------
+DATA:    BEGIN OF indxid,                                   " 6979
+           progr(8) TYPE c VALUE 'SAPMV75B',
+           spras    LIKE sy-langu, " Sprache
+         END   OF indxid.
+
+* ------ Gerettete Belegzeile (Hide) -----------------------------------
+DATA:    BEGIN OF postab_hide.                              " 6979
+        INCLUDE STRUCTURE v03rb.       " Listanzeigen-Struktur
+DATA:    END   OF postab_hide.
+
+*------- Logischer Schluessel der POSTAB --------  6175 --------------
+DATA:    BEGIN OF postab_key,
+           vbeln LIKE v03rb-vbeln,   " Beleg
+           posnr LIKE v03rb-posnr,   " Position
+           etenr LIKE v03rb-etenr,   " Einteilung
+         END   OF postab_key.
+
+*------- Gerette Felder (z.B. Gruppenendverarbeitung) ----------------
+DATA:    BEGIN OF old,
+           ktext(10) TYPE c,   " Feldname
+           anzpo(3)  TYPE p,   " Anzahl Posten
+         END OF old.
+*eject
+*-----------------------------------------------------------------------
+*       Teil 3 :  Einzelfelder
+*-----------------------------------------------------------------------
+DATA:    viewname(10)         TYPE c VALUE 'V03RB'."Structur der POSTAB
+
+
+*-----------------------------------------------------------------------
+*       Teil 4 :  Konstanten
+*-----------------------------------------------------------------------
+*-----------------------------------------------------------------------
+*       Teil 5 :  Field-Symbols
+*-----------------------------------------------------------------------
+
+
+*-----------------------------------------------------------------------
+*        COMMON DATA
+*-----------------------------------------------------------------------
+
+* ------ STATAB und FELDTAB --------------------------------------------
+DATA:    BEGIN OF COMMON PART cp2.
+INCLUDE mv75ac02.
+DATA:    END   OF COMMON PART.
+
+*-----------------------------------------------------------------------
+* global table with the header information
+TYPE-POOLS slis.
+
+DATA gt_top_page TYPE slis_t_listheader.
+* global variable with the maximal text length in the org data.
+DATA gv_max_length TYPE i.
+*-----------------------------------------------------------------------
+
+*       ---------------------------------------
+*       Teil 1 :  Tabellen      ( BEGIN OF ... OCCURS )
+*       Teil 2 :  Strukturen    ( BEGIN OF ... )
+*       Teil 3 :  Einzelfelder  ( variabel )
+*       Teil 4 :  Konstanten
+*       Teil 5 :  Field-Symbols
+*-----------------------------------------------------------------------
+
+*eject
+*-----------------------------------------------------------------------
+*       Teil 1 :  Tabellen      ( BEGIN OF ... OCCURS )
+*-----------------------------------------------------------------------
+* ----- Tabelle der bereits angezeigten Auftragskoepfe -----------------
+*         (Um redundante Ausgeben bei größerer max. Zugriffstiefe
+*         zu vermeiden)
+DATA:    BEGIN OF anz_kop OCCURS 500,
+           vbeln LIKE v03rb-vbeln,   " Beleg
+         END   OF anz_kop.
+
+* ----- Tabelle der bereits angezeigten Auftragspositionen -------------
+*         (Um redundante Ausgeben bei größerer max. Zugriffstiefe
+*         zu vermeiden)
+DATA:    BEGIN OF anz_pos OCCURS 500,
+           vbeln LIKE v03rb-vbeln,   " Beleg
+           posnr LIKE v03rb-posnr,   " Position
+         END   OF anz_pos.
+
+* ----- Tabelle der Ausgabefelder und ihrer Positionen -----------------
+DATA:    BEGIN OF austab OCCURS 20,
+           zeinr    LIKE t180s-zeinr,   " Zeile bei mehrz. Ausg
+           fname    LIKE t180s-fname,   " Name des Feldes
+           offse(3) TYPE n,   " Offset in Ausgabezeil
+           lengt    LIKE t180s-lengt,   " Ausgabelänge
+         END   OF austab.
+
+* ----- Tabelle der Selektionseingaben ---------------------------------
+DATA:    BEGIN OF eintab OCCURS 6.
+        INCLUDE STRUCTURE rkase.
+DATA:    END   OF eintab.
+
+* ----- Tabelle der Selektionseingaben vom Einstiegsbild ---------------
+DATA:    BEGIN OF eintab_ein OCCURS 6.
+        INCLUDE STRUCTURE rkase.
+DATA:    END   OF eintab_ein.
+
+* ----- Tabelle der nichterlaubten OKCODES -----------------------------
+DATA:    BEGIN OF exctab OCCURS 1,                          " 8801
+           okcod(4) TYPE c,                        "
+         END   OF exctab.                                   "
+
+* ----- Feldpositionen bei der Ausgabe der Zwischenzeile (bei Zw.summen)
+DATA:    BEGIN OF fpotab OCCURS 5,
+           posit(2) TYPE n,   " Ausgabeposition
+           inttype  LIKE dd03p-inttype, " interner Datentyp
+           datatype LIKE dd03p-datatype, " interner Datentyp
+           decimals LIKE dd03p-decimals, " interner Datentyp
+           reffield LIKE dd03p-reffield, " interner Datentyp
+           convexit LIKE rkaft-convexit, " Konvertierungsroutine
+         END   OF fpotab.
+
+* ----- Temporär: Tabelle der SY-LSTAT-Informationen pro Liststufe -----
+DATA:    BEGIN OF lsttab OCCURS 10,
+           lsind     LIKE sy-lsind,   " Liststufe
+           lstat(94) TYPE c,   " SY-LSTAT       15014
+         END   OF lsttab.
+
+* ----- Einträge Protokoll ---------------------------------------------
+DATA:    BEGIN OF news OCCURS 10,      " Protokoll
+           vbeln    LIKE v03rb-vbeln,
+           text(70).
+DATA:    END   OF news.
+
+* ----- Tabelle der Selektions-Felder ----------------------------------
+DATA:    BEGIN OF seftab OCCURS 3.
+        INCLUDE STRUCTURE rkasf.
+DATA:    END   OF seftab.
+* ----- Tabelle der Selektions-Felder vom Einstiegsbild (Nachlesen)-----
+DATA:    BEGIN OF seftab_ein OCCURS 3.
+        INCLUDE STRUCTURE rkasf.
+DATA:    END   OF seftab_ein.
+* ----- Tabelle der Selektionskriterien --------------------------------
+DATA:    BEGIN OF seltab OCCURS 6.
+        INCLUDE STRUCTURE rkask.
+DATA:    END   OF seltab.
+* ----- Tabelle der Selektionskriterien vom Einstiegsbild (Nachlesen)---
+DATA:    BEGIN OF seltab_ein OCCURS 6.
+        INCLUDE STRUCTURE rkask.
+DATA:    END   OF seltab_ein.
+
+* ------ Tabelle der Feldnamen, nach denen sortiert werden kann --------
+DATA:    BEGIN OF sortab OCCURS 10.
+        INCLUDE STRUCTURE rkast.
+DATA:    END   OF sortab.
+* ------ Tabelle der Feldnamen, nach denen summiert werden kann --------
+DATA:    BEGIN OF sumtab OCCURS 10.
+        INCLUDE STRUCTURE rkast.
+DATA:    END   OF sumtab.
+
+* ------ Tabelle fuer die Verwaltung der 'Summier-Modi' ----------------
+DATA:    BEGIN OF suvtab OCCURS 10,
+           sumkz(1)  TYPE c,   " Summenkennzeichen
+           ktext(10) TYPE c,   " Feldname
+         END   OF suvtab.
+
+* ----- Tabelle der Ueberschriftszeilen -----------------------------
+DATA:    BEGIN OF uebtab OCCURS 10,
+           zeinr      LIKE t180s-zeinr,   " Zeile bei mehrz. Ausg
+           ltext(134) TYPE c,   " Titelzeile
+         END   OF uebtab.
+* ------ Tabelle der Feldnamen, die im dyn. Window angeboten werden ----
+DATA:    BEGIN OF wintab OCCURS 1.
+        INCLUDE STRUCTURE rkawt.       " Feldname
+DATA:    END   OF wintab.
+
+* ------ Dummy-Tabelle für Funktionsbaustein ---------------------------
+DATA: BEGIN OF x OCCURS 1,
+        dummy,
+      END OF x.
+
+*eject
+*-----------------------------------------------------------------------
+*       Teil 2 :  Strukturen    ( BEGIN OF ... )
+*-----------------------------------------------------------------------
+*------- Schluessel für Zugriff auf die interne Tabelle ANZ_POS--------
+DATA:    BEGIN OF aupos,                                    " JW
+           vbeln LIKE v03rb-vbeln,   " Beleg
+           posnr LIKE v03rb-posnr,   " Position
+         END OF   aupos.
+*------- Beim Suchen oder Summieren festgelegte Fixwerte --------------
+DATA:    BEGIN OF fix,
+           wert(20)  TYPE c,   " Im Split 'fixiert'
+           wert1(20) TYPE c,   " Fixwert Stufe 1
+           wert2(20) TYPE c,   " Fixwert Stufe 2
+           wert3(20) TYPE c,   " Fixwert Stufe 3
+         END   OF fix.
+*------- Felder zur internen Steuerung (IS) ---------------------------
+DATA:    BEGIN OF is,
+           activ(4)        TYPE c,   " Selektionssteuerung
+           aktiv(4)        TYPE c,   " Selektionssteuerung
+           ende(3)         TYPE n,   " der Seite bei Eintrag
+           "   Nr. .. aus AKTSUM
+           nlevl(1)        TYPE n,   " Next Level
+           tabix           LIKE sy-tabix,      " akt. AKTSUM-Eintrag
+           varnr_austab    LIKE t180s-varnr,   " Welche Var. in AUSTAB
+           varnr_uebtab    LIKE t180s-varnr,   " Welche Var. in UEBTAB
+           " 6175
+           dywf1           LIKE t180s-fname,   " 1. Feld im dyn.Window
+           spltl_uebtab(2) TYPE n,   " Spaltelinks des DYWI
+           dywze_uebtab    LIKE t180s-zeinr,   " Ausgabezeile des DYWI
+           " 6979
+         END   OF is.
+
+*------- Im SY-LSTAT gestackte Statusinformation (LS = List-Status) --*
+*                                                                     *
+*     Stelle  Inhalt        Bedeutung / Werte                         *
+*     ------  ---------     -----------------                         *
+*       1     PF-STATUS     Doku siehe RFPOSFS0, STATUS_SETZEN        *
+*                                                                     *
+*       2     Sortierung    X  = absteigende Sortierung               *
+*                                                                     *
+*     3 - 5   Variante                                                *
+*                                                                     *
+*     6 - 7   Cursorline    Zeilennummer des Cursors.                 *
+*                                                                     *
+*       8     Current level im Summiermodus.                          *
+*                                                                     *
+*       9     Next level    im Summiermodus.                          *
+*                                                                     *
+*    10 - 12  Startindex    im Summiermodus.                          *
+*                                                                     *
+*    13 - 15  Akt. Index    im Summiermodus.                          *
+*                                                                     *
+*      16     Art der Listüberschrift.                                *
+*                 G = Grundliste
+*                 M = Summieren
+*                 O = Sortieren
+*                 U = Suchen
+*                 N = Nach Summen ( = wie bei Suchen )
+*                                                                     *
+*      17     Einheit, in der Summen gezeigt werden.                  *
+*                 F = Fremdwährung (WRSHB, Default)
+*                 H = Hauswährung (DMSHB)
+*                 B = Bewertete Hauswährung (BWWRT)
+*                                                                     *
+*     18-19   Spaltelinks (für dyn. Window)                           *
+*
+*     20-21   Spalterechts (für dyn. Window)                          *
+*                (könnte auch errechnet werden, vgl. IS-ENDE)
+*
+*     22-31   Feldname (des 1. Feldes im dyn. Window)
+*
+*      32     Liste mit Zwischentiteln?
+*
+*      33     Liste mit Zwischensummen?
+*
+*     34-43   Feldname (des 1. Sortierfeldes bei Zwischensummen)
+*
+*     44-53   Feldname (des 2. Sortierfeldes bei Zwischensummen)
+*
+*     54-63   Feldname (des 3. Sortierfeldes bei Zwischensummen)
+*
+*     64      Zeile, in der das Zusatzfeld steht                " 6175
+*
+*     65-74   Feldname (des 1. Sortierfeldes bei Zwischensummen) "15014
+*
+*     45-84   Feldname (des 2. Sortierfeldes bei Zwischensummen) "15014
+*
+*     85-94   Feldname (des 3. Sortierfeldes bei Zwischensummen) "15014
+* ------------------------------------------------------------------- *
+DATA:    BEGIN OF ls,
+           lstat(1) TYPE c,   " Status (CUA)
+           xdesc(1) TYPE c,   " Sort. absteigend?
+           varnr(3) TYPE c,   " Zeilenaufbau
+           cline(2) TYPE n,   " Cursorzeile
+           clevl(1) TYPE n,   " Current Level
+           nlevl(1) TYPE n,   " Next Level
+           start(3) TYPE n,   " der Seite bei Eintrag
+           "   Nr. .. aus AKTSUM
+           index(3) TYPE n,   " akt. Zeilennummer
+           title(1) TYPE c,   " Art des Titels
+           sunit(1) TYPE c,   " Einheit (HW,FW,...)
+           spltl(2) TYPE n,   " Spaltelinks
+           spltr(2) TYPE n,   " Spalterechts
+           dywf1    LIKE t180s-fname,   " 1. Feld im dyn.Window
+           ztitl(1) TYPE c,   " Liste mit Zw.titeln?
+           zsumm(1) TYPE c,   " Liste mit Zw.summen?
+           srtf1    LIKE t180s-fname,   " 1. Sortfeld (Zw.Sum)
+           srtf2    LIKE t180s-fname,   " 2. Sortfeld (Zw.Sum)
+           srtf3    LIKE t180s-fname,   " 3. Sortfeld (Zw.Sum)
+           dywze    LIKE t180s-zeinr,   " Zeile des dyn. Window
+           seff1    LIKE t180s-fname,   " 1. Suchfeld  "15014
+           seff2    LIKE t180s-fname,   " 2. Suchfeld  "15014
+           seff3    LIKE t180s-fname,   " 3. suchfeld  "15014
+         END   OF ls.
+
+*------- Maximale Zugriffs(Lese)-Tiefe --------------------------------
+DATA:    BEGIN OF max,
+           anztp(1)  TYPE c    " Maximaler Anzeigetyp
+                       VALUE '1',
+           zuart     LIKE vbcom-zuart    " Maximale Lesetiefe
+                       VALUE 'D',
+           name_dazu LIKE vbcom-name_dazu "Name gelesen?
+                       VALUE ' ',
+           stat_dazu LIKE vbcom-stat_dazu "STATUS gelesen? 6175
+                       VALUE ' ',
+         END   OF max.
+*eject
+*-----------------------------------------------------------------------
+*       Teil 3 :  Einzelfelder
+*-----------------------------------------------------------------------
+DATA:    subrc LIKE sy-subrc.
+DATA:    zaehl        LIKE sy-tabix.   " Postabindex JW
+DATA:    hlp_case(1) VALUE ' '.        " Fallunterscheidung
+" für FORM ZEILE_VERAENDERN
+
+DATA:    action(1) TYPE c,   " in Actionbar
+         afflg(1)  TYPE c,   " Ausg.zeile gefuellt ?
+         aktyp     LIKE t185f-aktyp    " Aktivität 3: Eint.)
+                        VALUE 'A',
+         answer(1) TYPE c,   " Antwort POPUP_TO_DECI
+         anzgr(1)  TYPE c,   " Anzeigegruppe
+         anzqu     TYPE p,   " Anzahl qual. Posten
+         anztp(1)  TYPE c.   " Anzeigetyp (1: Kopf,
+DATA:    blanks(20) TYPE c,   " BLANKS
+         btrgn(18)  TYPE c,   " Betrag nach Komma
+         btrgv(18)  TYPE c,   " Betrag vor Komma
+         betrag(18) TYPE c.   " Betrag in Char-Feld
+
+DATA:    char(100)     TYPE c,   " Hilfsfeld (allg.)
+         chart(134)    TYPE c,   " Hilfsfeld Topline
+         " 8940
+         charw(100)    TYPE c,   " Hilfsfeld Wert ausgeb
+         " 8940
+         char2(2)      TYPE c,   " Hilfsf. offene/alle A
+         char3(16)     TYPE c,   " Hilfsfeld
+         char4(21)     TYPE c,   " Hilfsfeld
+         cnt_epwin(2)  TYPE n,   " Einzelposten im
+         "   Window (im SPLIT).
+         cnt_field(2)  TYPE n,   " Anzahl Felder
+         cnt_lnumm(5)  TYPE n,   " laufende Nummer
+         cnt_waehr(2)  TYPE n,   " Zeilen mit gleicher
+         "   Waehrung.
+         crs_field(30) TYPE c,   " Cursor-Position
+         crs_offs(2)   TYPE c,   " Cursor-Offset
+         crs_line      LIKE sy-stepl,      " Cursor-Zeile
+         crs_cucol     LIKE sy-stepl,      " Cursor-Spalte
+         crs_lineold   LIKE sy-stepl.      " Cursor-Zeile gemerkt
+
+DATA:    date              TYPE d,   " Datum
+         datum             TYPE d,   " Datum (f. INDX)
+         defaultoption(1)  TYPE c,   " Vorschl. POPUP_TO_DEC
+         dezimalzeichen(1) TYPE c,   " Dezimalzeichen
+         dummy(1)          TYPE c,   " Listzeile
+         old_dummy(1)      TYPE c.   " Listzeile
+
+DATA:    error(1) TYPE c,   " Kennz.: Error?
+         exflg(1) TYPE c.   " EXIT aus Schleife ?
+
+DATA:    feld        LIKE rkaft-ktext, " Feldname
+         fetyp(3)    TYPE c,   " Feldtypen
+         firstrow(1) TYPE c,   " Erste Ausgabezeile?
+         fname(21)   TYPE c,   " Feldname + Tabpraefix
+         f1_f4_help  LIKE dfies-tabname. "F1/F4-Hilfe
+
+DATA:    hilf1(134) TYPE c,   " 1. Titelzeile
+         hilf2(134) TYPE c,   " 2. Titelzeile
+         hilfz(35)  TYPE c.   " Zwischensummen, Wert
+" 8550
+DATA:    I(5)     TYPE n,   " Schleifenzaehler
+         index(2) TYPE n.   " im STEP-LOOP
+
+
+DATA:    K(1)                TYPE c.   " Platzhalter
+
+DATA:    L(1)     TYPE c,   " Platzhalter
+         leng1(2) TYPE n,   " Bez. in 1.Titelzeile
+         leng2(2) TYPE n,   " akt. Feld
+         lfdnr    TYPE p,   " Lfd. Nr. bei Ausgabe
+         lsind    LIKE sy-lsind,   " Gewaehlter Listindex
+         " 9653
+         loopc(2) TYPE n.   " Anzahl Zeilen in LOOP
+
+DATA:    mcobj(4)            TYPE c.   " Matchcode  ehler
+
+DATA:    N(1)     TYPE n,   " Schleifenzaehler
+         nachl(1) TYPE c,   " Nachlesen noetig?
+         nefe1(5) TYPE n,   " Rechenfeld
+         nefe2(5) TYPE n.   " Rechenfeld
+
+DATA:    ok-code(5) TYPE c,   " OK-CODE
+         o_zuart    LIKE t180z-zuart.   " alte Zugriffsart
+
+DATA:    pfeld(20)           TYPE c.   " Parkfeld (Inhalt)
+
+DATA:    quflg(1)            TYPE c.   " Posten qualifiziert ?
+
+DATA:    refe(16)  TYPE p,   " Rechenfeld
+         refe1(16) TYPE p,   " Rechenfeld
+         refe2(16) TYPE p,   " Rechenfeld
+         refe3(16) TYPE p,   " Rechenfeld
+         refe4(16) TYPE p,   " Rechenfeld
+         refe5(16) TYPE p DECIMALS 3,  " ... mit 3 Nachkommast
+         report    LIKE sy-repid,      " Programmname
+         rcode(2)  TYPE p.   " Returncode
+
+DATA:    selkzflag TYPE n,   " Eingabebereites Feld
+         sprache   LIKE sy-langu.      " Sprache (f. INDX)
+
+DATA:    tabix          LIKE sy-tabix,      " SY-TABIX der POSTAB
+         tcode          LIKE sy-tcode,      " Transaktions-Code
+         tfill          LIKE sy-tfill,      " Eintraege in int. Tab
+         "   nach DESCRIBE
+         top01(134)     TYPE c,   " 1. Titelzeile " 8940
+         top02(134)     TYPE c,   " 2. Titelzeile " 8940
+         top03(134)     TYPE c,   " 3. Titelzeile " 8940
+         top06(134)     TYPE c,   " 6. Titelzeile "YLX
+         top07(134)     TYPE c,   " 7. Titelzeile "YLX
+         tophilf(134)   TYPE c,   " Hilfsfeld für Strichz
+         topdate        TYPE d,   " Datum in TOP-OF-LINE
+         topflag(1)     TYPE c,   " Überschriftszeile?
+         old_topflag(1) TYPE c,   " Überschriftszeile?
+         trvog          LIKE t180z-trvog.   " Transaktionsvorggrup
+*        TZEILE(80)          TYPE C.             " Erste Titelzeile"8940
+
+DATA:    varid(8)            TYPE c.   " Varinten-ID
+
+DATA:    wertl(100) TYPE c,   " Wert, wie auf Liste
+         " ausgegeben    " 6979
+         wnlvo(2)   TYPE n VALUE '07',  " Window Line von oben
+         wnlbo(2)   TYPE n VALUE '13',  " Window Line bis oben
+         wnlvu(2)   TYPE n VALUE '17',  " Window Line von unten
+         wnlbu(2)   TYPE n VALUE '22'.  " Window Line bis unten
+
+DATA:    xback(1) TYPE c,   " Automatisches BACK?
+                                                            " 10314
+         xexit(1) TYPE c,   " Abbrechen ?
+         xflag(1) TYPE c,   " allgemeines Flag
+         xsplt(1) TYPE c,   " Split-screen = X
+         " 9329
+         xselk(1) TYPE c,   " X=Selektieren
+         xstrt(3) TYPE n.   " Rettfeld SU-START
+
+DATA:    zeile(134)    TYPE c,   " Ausgabezeile
+         zeile2(134)   TYPE c,   " Zweite Titelzeile
+         zeile_dywi(1) TYPE n,   " Ausgabezeile DYWI
+         zeinr(1)      TYPE n,   " Nummer der Ausgabezei
+         zeilen(2)     TYPE n.   " Anzahl Ausgabezeilen
+*------- Felder fuer CALL SCREEN ---------------------------------------
+DATA:    spaltelinks(3)  TYPE n,   " des dynam. Windows
+         spalterechts(3) TYPE n,   " des dynam. Windows
+         zeileoben(3)    TYPE n,   " des dynam. Windows
+         zeileunten(3)   TYPE n.   " des dynam. Windows
+
+*------- Status der Listzeile (bei Massenaenderung) --------------------
+DATA:    status(1)           TYPE c.   " Status der Listzeile
+" 1 = hell
+" 2 = dunkel, aenderb.
+*------- Neue Felder fuer Guifizierung  nach 2.1d     ------------------
+DATA:    rechts_zwischensumme LIKE sy-cucol      " Ende Zwischensumme
+         VALUE 82.
+DATA:    links_zwischensumme  LIKE sy-cucol       "Anfang Zwischensumme
+         VALUE 2.
+
+DATA:    change_color TYPE c,   " Farbwechsel
+         spacesize    LIKE sy-linsz.      " Format ausblenden
+DATA:    u_laenge            LIKE sy-tabix.      " Überschriftslänge
+
+* Flag: Auswahl erfolgt
+DATA:   selektion(1).
+
+*eject
+*-----------------------------------------------------------------------
+*       Teil 4 :  Konstanten
+*-----------------------------------------------------------------------
+DATA:    hnull2(2)    TYPE x VALUE '0000', " Fuer Vergl. Begru
+         null10(10)   TYPE c VALUE '0000000000',
+         numerics(11) TYPE c VALUE ' 0123456789'.
+
+DATA:    hexnull(1) TYPE x VALUE '00',  " Hex. Null
+         null(1)    TYPE c VALUE '0',   " Char. 0
+         eins(1)    TYPE c VALUE '1',   " Char. 1
+         zwei(1)    TYPE c VALUE '2',   " Char. 2
+         drei(1)    TYPE c VALUE '3',   " Char. 3
+         vier(1)    TYPE c VALUE '4',   " Char. 4
+         fuenf(1)   TYPE c VALUE '5',   " Char. 5
+         sechs(1)   TYPE c VALUE '6',   " Char. 6
+         on(1)      TYPE c VALUE '1',
+         off(1)     TYPE c VALUE '0'.
+
+DATA: uebersicht VALUE 0,              "Ansprungmarken FD32
+      allg_daten VALUE 1,
+      kontrollbd VALUE 2.
+*eject
+*-----------------------------------------------------------------------
+*       Teil 5 :  Field-Symbols
+*-----------------------------------------------------------------------
+
+FIELD-SYMBOLS:
+  <biswert>,                    " Selektion bis ...
+  <ewertl>,                     " edit. Wert in Liste
+  " 8940
+  <ewertt>,                     " edit. Wert in Uebersc
+  " 8940
+  <feld1>, <feld2>, <feld3>,    " POSTAB-Felder
+  <fix1>,  <fix2>,  <fix3>,     " Fixierte Werte
+  <laenge>,                     " Länge
+  <position>,                   " in AKTIV-Leiste
+  <suchfeld>,                   " um Laenge zu modifiz.
+  <text>,                       " dazugeblendeter Text
+  <titel>,                      " Titel in dyn. Window
+  <titel1>, <titel2>,           " Titelzeile
+  <uline>,                      " Unterstriche
+  <vonwert>,                    " Selektion von ...
+  <waers>,                      " Waehrungsschl.
+  <wert1>,                      " Wert bei Einzelsel.
+  <wert2>,                      " Wert bei Einzelsel.
+  <nummer1>,                    " Schlüssel1 Topline
+  <nummer2>,                    " Schlüssel2 Topline
+  <struktur>,                   "K11K026370    " Ausgabestruktur
+  <wind1>.                      " Zusatzfeld1
+
+DATA:
+  hlp_answer,                      "Antwort aus Popup_to_confirm
+  flg_weiter.                      "Antwort aus sichern_notwendig
+
+DATA: selkz LIKE postab-selkz.         " Selektionsfeld
+
+DATA ls_order LIKE LINE OF outtable.
+
+INCLUDE rvvbtyp.
+CONSTANTS: quan_1 LIKE vbep-wmeng VALUE '1.000'.
+======================================================================
+*----------------------------------------------------------------------*
+***INCLUDE ZBACKORDER_INCLUDE.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  V03RB_FUELLEN
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM v03rb_fuellen .
+
+  DATA:  da_lines LIKE sy-tfill,
+         l_vapma  LIKE vapma  OCCURS 0 WITH HEADER LINE,
+         l_vakpa  LIKE vakpa  OCCURS 0 WITH HEADER LINE,
+         l_vbup   LIKE vbup   OCCURS 0 WITH HEADER LINE,
+         l_vbup2  LIKE vbup   OCCURS 0 WITH HEADER LINE.
+
+
+* Tabelle für VKORG in SELECT-Abfrage definieren
+  DATA: BEGIN OF tab_vkorg OCCURS 1,
+          sign(1),
+          option(2),
+          low       LIKE vapma-vkorg,
+          high      LIKE vapma-vkorg,
+        END OF tab_vkorg.
+
+* Tabelle für VTWEG in SELECT-Abfrage definieren
+  DATA: BEGIN OF tab_vtweg OCCURS 1,
+          sign(1),
+          option(2),
+          low       LIKE vapma-vtweg,
+          high      LIKE vapma-vtweg,
+        END OF tab_vtweg.
+
+* Tabelle für SPART in SELECT-Abfrage definieren
+  DATA: BEGIN OF tab_spart OCCURS 1,
+          sign(1),
+          option(2),
+          low       LIKE vapma-spart,
+          high      LIKE vapma-spart,
+        END OF tab_spart.
+
+* Tabelle für VKGRP in SELECT-Abfrage definieren
+  DATA: BEGIN OF tab_vkgrp OCCURS 1,
+          sign(1),
+          option(2),
+          low       LIKE vapma-vkgrp,
+          high      LIKE vapma-vkgrp,
+        END OF tab_vkgrp.
+
+* Tabelle für VKBUR in SELECT-Abfrage definieren
+  DATA: BEGIN OF tab_vkbur OCCURS 1,
+          sign(1),
+          option(2),
+          low       LIKE vapma-vkbur,
+          high      LIKE vapma-vkbur,
+        END OF tab_vkbur.
+
+* Tabelle für ERNAM in SELECT-Abfrage definieren
+  DATA: BEGIN OF tab_ernam OCCURS 1,
+          sign(1),
+          option(2),
+          low       LIKE vapma-ernam,
+          high      LIKE vapma-ernam,
+        END OF tab_ernam.
+
+  DATA lt_data     TYPE tt_data_merge.
+
+  DATA: lv_objek      TYPE objnum,
+        lt_class      TYPE TABLE OF sclass,
+        lt_objectdata TYPE TABLE OF clobjdat,
+        lt_sel_char   TYPE TABLE OF sel_char.
+
+  REFRESH: postab.
+
+* Auswahl vorgegeben: CO06 eingeschränkt aufrufen
+  IF NOT ( s_vbeln IS INITIAL AND s_bstnk IS INITIAL ).
+    selektion                = 'X'.
+  ENDIF.
+
+* Felder für SELECT vorbereiten
+  IF p_vkorg NE space.
+    MOVE: 'I'            TO tab_vkorg-sign,
+          'BT'           TO tab_vkorg-option,
+          p_vkorg        TO tab_vkorg-low,
+          p_vkorg        TO tab_vkorg-high.
+    APPEND tab_vkorg.
+    selektion                = 'X'.
+  ELSE.
+    CLEAR tab_vkorg.
+    REFRESH tab_vkorg.
+  ENDIF.
+  IF p_vtweg NE space.
+    MOVE: 'I'            TO tab_vtweg-sign,
+          'BT'           TO tab_vtweg-option,
+          p_vtweg        TO tab_vtweg-low,
+          p_vtweg        TO tab_vtweg-high.
+    APPEND tab_vtweg.
+    selektion                = 'X'.
+  ELSE.
+    CLEAR tab_vtweg.
+    REFRESH tab_vtweg.
+  ENDIF.
+  IF p_spart NE space.
+    MOVE: 'I'            TO tab_spart-sign,
+          'BT'           TO tab_spart-option,
+          p_spart        TO tab_spart-low,
+          p_spart        TO tab_spart-high.
+    APPEND tab_spart.
+    selektion                = 'X'.
+  ELSE.
+    CLEAR tab_spart.
+    REFRESH tab_spart.
+  ENDIF.
+  IF p_vkgrp NE space.
+    MOVE: 'I'            TO tab_vkgrp-sign,
+          'BT'           TO tab_vkgrp-option,
+          p_vkgrp        TO tab_vkgrp-low,
+          p_vkgrp        TO tab_vkgrp-high.
+    APPEND tab_vkgrp.
+    selektion                = 'X'.
+  ELSE.
+    CLEAR tab_vkgrp.
+    REFRESH tab_vkgrp.
+  ENDIF.
+  IF p_vkbur NE space.
+    MOVE: 'I'            TO tab_vkbur-sign,
+          'BT'           TO tab_vkbur-option,
+          p_vkbur        TO tab_vkbur-low,
+          p_vkbur        TO tab_vkbur-high.
+    APPEND tab_vkbur.
+    selektion                = 'X'.
+  ELSE.
+    CLEAR tab_vkbur.
+    REFRESH tab_vkbur.
+  ENDIF.
+  IF p_ernam NE space.
+    MOVE: 'I'            TO tab_ernam-sign,
+          'BT'           TO tab_ernam-option,
+          p_ernam        TO tab_ernam-low,
+          p_ernam        TO tab_ernam-high.
+    APPEND tab_ernam.
+    selektion                = 'X'.
+  ELSE.
+    CLEAR tab_ernam.
+    REFRESH tab_ernam.
+  ENDIF.
+
+  IF s_kunnr NE space.
+    selektion              = 'X'.
+  ENDIF.
+
+  "BOC Ashish CR1704 16/11/25.
+  CALL FUNCTION 'CONVERSION_EXIT_PARVW_INPUT'
+    EXPORTING
+      input  = 'SH'
+    IMPORTING
+      output = p_parvw_sh.
+  CALL FUNCTION 'CONVERSION_EXIT_PARVW_INPUT'
+    EXPORTING
+      input  = 'WE'
+    IMPORTING
+      output = p_parvw_we.
+  "EOC Ashish 16/11/25.
+  IF s_matnr[] IS INITIAL OR
+    s_vbeln[] IS NOT INITIAL.
+
+    SELECT vbap~mandt vbap~vbeln vbap~posnr vbap~mtvfp vbap~sumbd vbap~kwmeng
+    vbap~kbmeng vbap~plavo vbap~sobkz vbap~uepos vbap~prosa vbap~lprio
+    vbap~kzfme vbap~umvkn vbap~umvkz vbap~fixmg vbap~matnr vbap~werks
+    vbap~lgort vbap~charg vbap~arktx vbap~abgru vbap~kdmat vbap~grkor
+    vbap~netwr vbap~waerk vbap~meins vbap~vrkme vbap~antlf vbap~kztlf
+    vbap~erdat vbap~ernam vbap~bedae vbap~berid vbap~spart vbap~sgt_rcat
+
+    vbak~vbtyp vbak~abdis vbak~kunnr vbak~autlf vbak~vkorg vbak~vtweg
+    vbak~vkgrp vbak~vkbur vbak~lifsk vbak~bstnk
+
+    vbup~rfsta vbup~rfgsa vbup~lfsta vbup~lfgsa vbup~absta vbup~uvall
+
+    vbep~bdart vbep~plart vbep~mbdat vbep~etenr vbep~edatu vbep~cmeng
+    vbep~abart vbep~bmeng vbep~lmeng vbep~wmeng vbep~lifsp vbep~lfrel
+    FROM vbap
+    INNER JOIN vbak
+    ON vbak~vbeln EQ vbap~vbeln
+    INNER JOIN vbup
+    ON  vbup~vbeln EQ vbap~vbeln
+    AND vbup~posnr EQ vbap~posnr
+    INNER JOIN vbep
+    ON  vbep~vbeln EQ vbap~vbeln
+    AND vbep~posnr EQ vbap~posnr
+    INTO CORRESPONDING FIELDS OF TABLE lt_data
+    WHERE vbap~matnr IN s_matnr
+    AND vbap~werks IN s_werks
+    AND vbap~vbeln IN s_vbeln
+*          AND NOT vbap~sobkz IN ('E','Q')
+    AND NOT  vbap~mtvfp = '' " or vbap~sumbd = '' )
+    AND ( vbap~kwmeng > 0 OR vbap~kbmeng > 0 OR NOT vbap~plavo = '' )
+    AND vbak~kunnr IN s_kunnr
+    AND vbak~bstnk IN s_bstnk
+    AND vbak~vkorg IN tab_vkorg
+    AND vbak~vtweg IN tab_vtweg
+    AND vbak~spart IN tab_spart
+    AND vbak~vkgrp IN tab_vkgrp
+    AND vbak~vkbur IN tab_vkbur
+    AND vbak~ernam IN tab_ernam
+*          AND NOT vbak~vbtyp IN ('D','G','K','L') "VBTYP_OHNE_EINTEILUNG
+    AND vbak~vbtyp EQ 'C'
+    "BOC CR 1704 Ashish 16/11/25.
+*    AND vbak~erzet IN s_creon "commented by samim
+     AND vbak~erdat IN s_creon "added by samim
+    "EOC Ashish 16/11/25.
+    AND vbup~rfsta NE 'C'
+    AND vbup~rfgsa NE 'C'
+    AND vbup~lfsta NE 'C'
+    AND vbup~lfgsa NE 'C'
+    AND vbup~absta NE 'C'.
+
+  ELSE.
+
+    SELECT vbap~mandt vbap~vbeln vbap~posnr vbap~mtvfp vbap~sumbd vbap~kwmeng
+    vbap~kbmeng vbap~plavo vbap~sobkz vbap~uepos vbap~prosa vbap~lprio
+    vbap~kzfme vbap~umvkn vbap~umvkz vbap~fixmg vbap~matnr vbap~werks
+    vbap~lgort vbap~charg vbap~arktx vbap~abgru vbap~kdmat vbap~grkor
+    vbap~netwr vbap~waerk vbap~meins vbap~vrkme vbap~antlf vbap~kztlf
+    vbap~erdat vbap~ernam vbap~bedae vbap~berid vbap~spart vbap~sgt_rcat
+
+    vbak~vbtyp vbak~abdis vbak~kunnr vbak~autlf vbak~vkorg vbak~vtweg
+    vbak~vkgrp vbak~vkbur vbak~lifsk vbak~bstnk
+
+    vbup~rfsta vbup~rfgsa vbup~lfsta vbup~lfgsa vbup~absta vbup~uvall
+
+    vbep~bdart vbep~plart vbep~mbdat vbep~etenr vbep~edatu vbep~cmeng
+    vbep~abart vbep~bmeng vbep~lmeng vbep~wmeng vbep~lifsp vbep~lfrel
+    FROM vapma
+    INNER JOIN vbap
+    ON  vbap~vbeln EQ vapma~vbeln
+    AND vbap~posnr EQ vapma~posnr
+    INNER JOIN vbak
+    ON vbak~vbeln EQ vbap~vbeln
+    INNER JOIN vbup
+    ON  vbup~vbeln EQ vbap~vbeln
+    AND vbup~posnr EQ vbap~posnr
+    INNER JOIN vbep
+    ON  vbep~vbeln EQ vbap~vbeln
+    AND vbep~posnr EQ vbap~posnr
+    INTO CORRESPONDING FIELDS OF TABLE lt_data
+    WHERE vapma~matnr IN s_matnr
+    AND vapma~werks IN s_werks
+*        AND NOT vbap~sobkz IN ('E','Q')
+    AND NOT vbap~mtvfp = '' "OR vbap~sumbd = '' )
+    AND ( vbap~kwmeng > 0 OR vbap~kbmeng > 0 OR NOT vbap~plavo = '' )
+    AND vbak~kunnr IN s_kunnr
+    AND vbak~bstnk IN s_bstnk
+    AND vbak~vkorg IN tab_vkorg
+    AND vbak~vtweg IN tab_vtweg
+    AND vbak~spart IN tab_spart
+    AND vbak~vkgrp IN tab_vkgrp
+    AND vbak~vkbur IN tab_vkbur
+    AND vbak~ernam IN tab_ernam
+*        AND NOT vbak~vbtyp IN ('D','G','K','L') "VBTYP_OHNE_EINTEILUNG
+    AND vbak~vbtyp EQ 'C'
+    "BOC CR 1704 Ashish 16/11/25.
+*    AND vbak~erzet IN s_creon "commedted by samim
+    AND vbak~erdat IN s_creon "added by samim
+    "EOC Ashish 16/11/25.
+    AND vbup~rfsta NE 'C'
+    AND vbup~rfgsa NE 'C'
+    AND vbup~lfsta NE 'C'
+    AND vbup~lfgsa NE 'C'
+    AND vbup~absta NE 'C'.
+  ENDIF.
+
+  PERFORM postab_aufbauen USING lt_data.
+
+  SORT postab[] BY vbeln posnr.
+  FREE: gt_field_len.
+  "BOC CR 1704 Ashish 14/11/2025.
+  IF postab[] IS NOT INITIAL.
+    SELECT vbeln,parvw,kunnr
+      FROM vbpa
+      INTO TABLE @DATA(lt_vbpa)
+      FOR ALL ENTRIES IN @postab
+      WHERE vbeln = @postab-vbeln
+      AND ( parvw EQ @p_parvw_sh OR
+            parvw EQ @p_parvw_we ) .
+
+    "added by samim
+    " Step 1: Get billing documents from document flow
+    SELECT vbelv,
+      posnv,
+      vbeln,
+      posnn
+      FROM vbfa
+      INTO TABLE @DATA(lt_vbfa)
+      FOR ALL ENTRIES IN @postab
+      WHERE vbelv   = @postab-vbeln
+        AND vbtyp_n = 'M'.   " Billing document
+
+    SORT lt_vbfa BY vbeln posnn.
+    IF lt_vbfa IS NOT INITIAL.
+      " Step 2: Get billing headers (filter cancelled, accounting complete, exclude proforma)
+      SELECT vbeln,
+             vbtyp,
+             rfbsk,
+             fksto
+        FROM vbrk
+        INTO TABLE @DATA(lt_vbrk)
+        FOR ALL ENTRIES IN @lt_vbfa
+        WHERE vbeln = @lt_vbfa-vbeln
+          AND fksto <> 'X'
+          AND rfbsk = 'C'
+          AND vbtyp NOT IN ('N','S').
+    ENDIF.
+    SORT lt_vbrk BY vbeln.
+    IF lt_vbrk IS NOT INITIAL.
+      " Step 3: Get billing items
+      SELECT  vbeln,
+            posnr,
+            fkimg,
+           aubel
+
+        FROM vbrp
+        INTO TABLE @DATA(lt_vbrp)
+        FOR ALL ENTRIES IN @lt_vbrk
+        WHERE vbeln = @lt_vbrk-vbeln.
+    ENDIF.
+    SORT lt_vbrp BY aubel.
+
+
+
+
+    SELECT matnr,
+           werks,
+           labst
+      FROM mard
+      FOR ALL ENTRIES IN @postab
+      WHERE matnr = @postab-matnr
+        AND werks = @postab-werks
+      INTO TABLE @DATA(lt_mard).
+    DATA(lt_mard_sum) = lt_mard[].
+    SORT lt_mard_sum BY matnr werks.
+    DELETE ADJACENT DUPLICATES FROM lt_mard_sum COMPARING matnr werks.
+    LOOP AT lt_mard_sum ASSIGNING FIELD-SYMBOL(<fs_mard1>) .
+      <fs_mard1>-labst = REDUCE labst(
+                    INIT x =  0
+                    FOR row IN lt_mard
+                    WHERE ( matnr = <fs_mard1>-matnr AND
+                            werks = <fs_mard1>-werks )
+                    NEXT x = x + row-labst ).
+    ENDLOOP.
+
+
+  ENDIF.
+  SORT lt_vbpa BY vbeln parvw.
+  IF lt_vbpa IS NOT INITIAL.
+    SELECT kunnr,name1,name2
+       FROM kna1
+      INTO TABLE @DATA(lt_kna)
+      FOR ALL ENTRIES IN @lt_vbpa
+      WHERE kunnr = @lt_vbpa-kunnr.
+  ENDIF.
+  SORT lt_kna BY kunnr.
+  SORT lt_mard BY matnr werks."added by samim
+  SORT lt_vbfa BY vbelv posnv.
+  "EOC Ashish 14/11/2025.
+
+  LOOP AT postab WHERE lfdat_1 IN s_firdt.
+    outtab-matnr = postab-matnr.
+    CALL FUNCTION 'CONVERSION_EXIT_CUNIT_OUTPUT' "added by samim 29/01/26
+      EXPORTING
+        input    = postab-meins
+        language = sy-langu
+      IMPORTING
+        output   = outtab-base_uom.
+    "BOC CR 1704 Ashish 14/11/25.
+    READ TABLE lt_vbpa ASSIGNING FIELD-SYMBOL(<fs_vbpa>)
+            WITH KEY vbeln = postab-vbeln
+                     parvw = p_parvw_we BINARY SEARCH.
+    IF sy-subrc = 0.
+      outtab-shipto = <fs_vbpa>-kunnr.
+    ENDIF.
+    READ TABLE lt_kna ASSIGNING FIELD-SYMBOL(<fs_kna>)
+        WITH KEY kunnr = <fs_vbpa>-kunnr BINARY SEARCH.
+    IF sy-subrc = 0.
+      CONCATENATE <fs_kna>-name1
+                  <fs_kna>-name2
+             INTO outtab-shipnam.
+    ENDIF.
+    outtab-custmat = postab-kdmat.
+    READ TABLE lt_vbfa ASSIGNING FIELD-SYMBOL(<fs_vbfa>)
+              WITH KEY vbelv = postab-vbeln posnv = postab-posnr
+              BINARY SEARCH.
+    IF sy-subrc = 0.
+      outtab-invqty = REDUCE #(
+                  INIT x = 0
+                  FOR row2 IN lt_vbrp
+                  WHERE ( aubel = <fs_vbfa>-vbelv
+                          AND posnr = <fs_vbfa>-posnn )
+                  NEXT x = x + row2-fkimg ).
+
+    ENDIF.
+    READ TABLE lt_mard_sum ASSIGNING FIELD-SYMBOL(<fs_mard>)
+      WITH KEY matnr = postab-matnr
+               werks = postab-werks
+               BINARY SEARCH.
+    IF sy-subrc = 0.
+      outtab-labst = <fs_mard>-labst.
+    ENDIF.
+    "EOC Ashish 14/11/25.
+    CLEAR lv_objek.
+    FREE: lt_objectdata, lt_class.
+    lv_objek = postab-matnr.
+    CALL FUNCTION 'CLAF_CLASSIFICATION_OF_OBJECTS'
+      EXPORTING
+        classtype          = '001'
+        object             = lv_objek
+        objecttable        = 'MARA'
+        initial_charact    = abap_false
+      TABLES
+        t_class            = lt_class
+        t_objectdata       = lt_objectdata
+*       I_SEL_CHARACTERISTIC       =
+      EXCEPTIONS
+        no_classification  = 1
+        no_classtypes      = 2
+        invalid_class_type = 3
+        OTHERS             = 4.
+
+    READ TABLE lt_objectdata INTO DATA(ls_objectdata) WITH KEY atnam = 'PRODUCT_TYPE'.
+    IF sy-subrc = 0.
+      DATA: lv_matnr TYPE mara-matnr.
+      outtab-pr_type = ls_objectdata-ausp1.
+      CALL FUNCTION 'CONVERSION_EXIT_MATN1_INPUT'
+        EXPORTING
+          input        = outtab-pr_type
+        IMPORTING
+          output       = lv_matnr
+        EXCEPTIONS
+          length_error = 1
+          OTHERS       = 2.
+      SELECT SINGLE maktx INTO outtab-pr_type_des
+        FROM makt WHERE matnr = lv_matnr AND spras = sy-langu.
+    ENDIF.
+
+    READ TABLE lt_objectdata INTO ls_objectdata WITH KEY atnam = 'GEOMETRY'.
+    IF sy-subrc = 0.
+      outtab-geometry = ls_objectdata-ausp1.
+    ENDIF.
+
+    READ TABLE lt_objectdata INTO ls_objectdata WITH KEY atnam = 'LINE_1_TECH'.
+    IF sy-subrc = 0.
+      outtab-line_1_tech = ls_objectdata-ausp1.
+    ENDIF.
+    READ TABLE lt_objectdata INTO ls_objectdata WITH KEY atnam = 'LINE_2_SALES'.
+    IF sy-subrc = 0.
+      outtab-line_2_sales = ls_objectdata-ausp1.
+    ENDIF.
+    READ TABLE lt_objectdata INTO ls_objectdata WITH KEY atnam = 'TYPE_1_TECH'.
+    IF sy-subrc = 0.
+      outtab-type_1_tech = ls_objectdata-ausp1.
+    ENDIF.
+    READ TABLE lt_objectdata INTO ls_objectdata WITH KEY atnam = 'TYPE_2_SALES'.
+    IF sy-subrc = 0.
+      outtab-type_2_sales = ls_objectdata-ausp1.
+    ENDIF.
+
+    outtab-arktx = postab-arktx.
+    outtab-kunnr = postab-kunnr.
+    SELECT SINGLE name1 INTO outtab-name1
+      FROM kna1 WHERE kunnr = postab-kunnr.
+* outtab-name1 = postab-name1.
+    outtab-vbeln = postab-vbeln.
+    outtab-posnr = postab-posnr.
+    outtab-bstnk = postab-bstnk.   " PO Number
+    outtab-lfdat_1 = postab-lfdat_1.  " first delivery date
+    outtab-kwmeng = postab-kwmeng.
+    outtab-kbmeng = postab-kbmeng.
+    outtab-olfmng = postab-olfmng.
+    outtab-vrkme = postab-vrkme. " sales unit
+    READ TABLE lt_data INTO DATA(ls_data) WITH KEY vbeln = postab-vbeln
+                                                   posnr = postab-posnr.
+    IF sy-subrc = 0.
+      outtab-netwr = ls_data-netwr.
+      outtab-opnpr = ls_data-netwr / postab-kwmeng * outtab-olfmng .
+      outtab-waerk = postab-waerk.
+    ENDIF.
+    PERFORM f_fill_tab_field_len USING outtab CHANGING gt_field_len.
+    "BOC CR 1704 Ashish 17/11/25.
+    IF s_party[] IS NOT INITIAL.
+      IF outtab-shipto NOT IN s_party.
+        CONTINUE.
+      ENDIF.
+    ENDIF.
+    "EOC Ashish 17/11/25.
+    APPEND outtab TO outtable.
+    CLEAR outtab.
+  ENDLOOP.
+
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+*       FORM PARTNERANSCHRIFT
+*---------------------------------------------------------------------*
+*       Zeigt die Anschrift des ausgewählten Partners                 *
+*---------------------------------------------------------------------*
+*  -->  KUNNR     Kundennummer                                        *
+*  <--  Window mit Anschriftsdaten                                    *
+*---------------------------------------------------------------------*
+FORM partneranschrift USING k01-kunnr.
+  DATA: anschrift(40) TYPE c.
+  anschrift = text-065.
+
+  CALL FUNCTION 'VIEW_KNA1'
+    EXPORTING
+      kunde     = k01-kunnr
+    IMPORTING
+      anschrift = kna1.
+  MOVE-CORRESPONDING kna1 TO adrs.
+
+  CALL FUNCTION 'RV_ADDRESS_WINDOW_DISPLAY'
+    EXPORTING
+      adrswa_in = adrs
+      fadrtype  = space.
+ENDFORM.                    "PARTNERANSCHRIFT
+*eject
+*---------------------------------------------------------------------*
+*       FORM PARTNERNAME_LESEN                                        *
+*---------------------------------------------------------------------*
+*       Liest Partnername1 mit dem VIEW_KNA1                          *
+*---------------------------------------------------------------------*
+FORM partnername_lesen USING partner anzeige.
+  DATA: anschrift(40) TYPE c.
+  anschrift = text-065.
+
+  IF anzeige = space.
+    MOVE partner     TO vbpa-kunnr.
+    MOVE partner     TO vbpa-lifnr.
+    MOVE partner     TO vbpa-pernr.
+    MOVE partner     TO vbpa-parnr.
+    MOVE rv75a-parvw TO vbpa-parvw.
+    CALL FUNCTION 'VIEW_VBADR'
+      EXPORTING
+        input   = vbpa
+        message = 'X'
+      IMPORTING
+        adresse = vbadr.
+    MOVE-CORRESPONDING vbadr TO kna1.
+    MOVE partner     TO kna1-kunnr.
+  ELSE.
+    MOVE-CORRESPONDING vbadr TO adrs.
+    CALL FUNCTION 'RV_ADDRESS_WINDOW_DISPLAY'
+      EXPORTING
+        adrswa_in = adrs
+        fadrtype  = space.
+  ENDIF.
+ENDFORM.                    "PARTNERNAME_LESEN
+*eject
+*---------------------------------------------------------------------*
+*       FORM PARTNERROLLE_LESEN                                       *
+*---------------------------------------------------------------------*
+*       Liest Partnerrolle aus Tabelle PART                           *
+*---------------------------------------------------------------------*
+*  -->  SPRACHE   Sprache                                             *
+*  -->  PARVW     Partnerrolle                                        *
+*---------------------------------------------------------------------*
+FORM partnerrolle_lesen USING sprache parvw.
+  SELECT SINGLE * FROM tpart
+                  WHERE spras = sprache
+                  AND parvw = parvw.
+ENDFORM.                    "PARTNERROLLE_LESEN
+*---------------------------------------------------------------------*
+*       FORM POSTAB_AUFBAUEN                                          *
+*---------------------------------------------------------------------*
+*                                                                     *
+*---------------------------------------------------------------------*
+FORM postab_aufbauen USING it_data TYPE tt_data_merge.
+
+  DATA:    BEGIN OF xvbep OCCURS 0.
+          INCLUDE STRUCTURE vbepvb.
+  DATA:    END OF xvbep.
+  DATA:    xvbfa LIKE vbfavb OCCURS 0.
+  DATA:    BEGIN OF xvbapf OCCURS 0.
+          INCLUDE STRUCTURE vbapf.
+  DATA:    END OF xvbapf,
+  da_posnr LIKE vbap-posnr,
+    da_omeng LIKE vbap-kwmeng,
+    da_pssum LIKE vbap-kwmeng,
+    da_lines LIKE sy-tfill.
+  DATA: lv_vbeln TYPE vbap-vbeln,
+        lv_posnr TYPE vbap-posnr.
+  DATA: lt_vbfa TYPE SORTED TABLE OF vbfa WITH NON-UNIQUE KEY vbelv posnv,
+        lt_data LIKE it_data.
+
+  TYPES:BEGIN OF ty_mara,
+          matnr   TYPE matnr,
+          sgt_rel TYPE sgt_rel,
+          meins   TYPE meins, "added by samim
+        END OF ty_mara,
+
+        BEGIN OF ty_marc,
+          matnr     TYPE matnr,
+          werks     TYPE werks_d,
+          sgt_covs  TYPE sgt_covs,
+          sgt_statc TYPE sgt_statc,
+        END OF ty_marc.
+
+  DATA: lt_mara   TYPE TABLE OF ty_mara,
+        ls_mara   TYPE ty_mara,
+        lt_marc   TYPE TABLE OF ty_marc,
+        ls_marc   TYPE ty_marc,
+        lv_flag   TYPE c,
+        lv_r_code TYPE sy-subrc.
+
+  CONSTANTS: lc_r      TYPE c VALUE 'R',
+             lc_x      TYPE c VALUE 'X',
+             lc_var(3) TYPE c VALUE 'VAR'.
+
+  FIELD-SYMBOLS: <ls_data> LIKE LINE OF it_data,
+                 <ls_vbep> LIKE LINE OF it_data,
+                 <ls_vbfa> LIKE LINE OF lt_vbfa.
+
+
+  CHECK it_data IS NOT INITIAL.
+  lt_data = it_data.
+  DELETE ADJACENT DUPLICATES FROM lt_data COMPARING vbeln posnr.
+  SELECT * INTO TABLE lt_vbfa FROM vbfa
+     FOR ALL ENTRIES IN lt_data
+     WHERE vbelv EQ lt_data-vbeln
+       AND posnv EQ lt_data-posnr
+         ORDER BY PRIMARY KEY.
+  IF cl_ops_switch_check=>sfsw_segmentation( ) EQ abap_on.
+    SELECT matnr
+           sgt_rel
+           meins "added by samim
+       FROM mara
+       INTO CORRESPONDING FIELDS OF TABLE lt_mara
+       FOR ALL ENTRIES IN lt_data
+     WHERE matnr =  lt_data-matnr.
+
+    SELECT matnr
+           werks
+           sgt_covs
+           sgt_statc
+       FROM marc
+       INTO CORRESPONDING FIELDS OF TABLE lt_marc
+       FOR ALL ENTRIES IN lt_data
+     WHERE matnr =  lt_data-matnr
+      AND  werks =  lt_data-werks.
+
+  ENDIF.
+  FREE lt_data.
+
+  LOOP AT it_data ASSIGNING <ls_data>.
+
+    CLEAR: postab,
+           da_posnr,
+           da_omeng,
+           da_pssum,
+           da_lines,
+           vbap,
+           vbup.
+
+    MOVE-CORRESPONDING <ls_data> TO vbap.
+    MOVE-CORRESPONDING <ls_data> TO vbup.
+    IF cl_ops_switch_check=>sfsw_segmentation( ) EQ abap_on.
+* If req cat is missing check if it is required, no need to show in list
+      CLEAR:lv_flag,lv_r_code,ls_marc,ls_mara.
+      READ TABLE lt_mara INTO ls_mara WITH KEY matnr = vbap-matnr.
+      IF ls_mara-sgt_rel = lc_x.
+        READ TABLE lt_marc INTO ls_marc WITH KEY matnr = vbap-matnr.
+* Check coverage strategy fixed and is assigned to material
+        IF ls_marc-sgt_statc = lc_x AND
+           ls_marc-sgt_covs IS NOT INITIAL.
+          CALL FUNCTION 'SGTG_CHECK_CAT_VALID_CONDENSE'
+            EXPORTING
+              iv_plant        = vbap-werks
+              iv_covs         = ls_marc-sgt_covs
+              iv_appl         = lc_r
+              iv_cfun         = lc_var
+              iv_cat_value    = vbap-sgt_rcat
+            IMPORTING
+              ev_r_code       = lv_r_code
+            EXCEPTIONS
+              eliminate_error = 1
+              internal_error  = 2
+              OTHERS          = 3.
+* Requirement category is needed.
+          IF lv_r_code NE 0.
+            lv_flag = lc_x.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+      CHECK lv_flag NE lc_x .
+    ENDIF.
+    IF lv_vbeln EQ <ls_data>-vbeln AND
+       lv_posnr EQ <ls_data>-posnr.
+      CONTINUE.
+    ENDIF.
+    lv_vbeln = <ls_data>-vbeln.
+    lv_posnr = <ls_data>-posnr.
+    "BOC CR 1704 Ashish 14/11/2025.
+    postab-kdmat = <ls_data>-kdmat.
+    postab-matnr = <ls_data>-matnr.
+    postab-meins = VALUE #( lt_mara[ matnr = <ls_data>-matnr ]-meins OPTIONAL ).
+    postab-werks = <ls_data>-werks.
+    postab-lgort = <ls_data>-lgort.
+    "EOC Ashish 14/11/2025.
+
+* Product selection - Positionen nicht anzeigen
+    da_posnr = <ls_data>-posnr.
+    IF NOT <ls_data>-uepos IS INITIAL AND
+           <ls_data>-prosa EQ 'B'.
+      da_posnr = <ls_data>-uepos.
+
+* Sum up all lower items
+      IF <ls_data>-rfsta EQ 'B' OR
+         <ls_data>-rfgsa EQ 'B' OR
+         <ls_data>-lfsta EQ 'B' OR
+         <ls_data>-lfgsa EQ 'B'.
+        SELECT SUM( klmeng ) INTO da_pssum
+               FROM vbap WHERE vbeln = <ls_data>-vbeln
+                      AND posnr < <ls_data>-posnr
+                      AND uepos = <ls_data>-uepos
+                    AND prosa = 'B'.
+      ENDIF.
+    ENDIF.
+    CLEAR: xvbep[], xvbep.
+    LOOP AT it_data ASSIGNING <ls_vbep>
+      WHERE vbeln = <ls_data>-vbeln
+        AND posnr = <ls_data>-posnr
+        AND etenr IS NOT INITIAL.
+
+*      IF NOT <ls_vbep>-bdart IS INITIAL OR
+*         NOT <ls_vbep>-plart IS INITIAL.
+      da_lines = da_lines + 1.
+      MOVE-CORRESPONDING <ls_vbep> TO xvbep.
+      APPEND xvbep.
+** Bei Lieferplänen mit Abrufen müssen auch die nicht bedarfsrelevanten
+** Einteilungen zur Errechnung der Abruf-FZ übernommen werden.
+*      ELSEIF NOT <ls_data>-abdis IS INITIAL.
+*        IF NOT <ls_vbep>-bdart IS INITIAL OR
+*           NOT <ls_vbep>-plart IS INITIAL.
+*          da_lines = da_lines + 1.
+*        ENDIF.
+*        MOVE-CORRESPONDING <ls_vbep> TO xvbep.
+*        APPEND xvbep.
+*      ENDIF.
+    ENDLOOP.
+    SORT xvbep BY vbeln posnr mbdat etenr.
+    CHECK da_lines > 0.
+    IF <ls_data>-abdis IS INITIAL.
+      REFRESH xvbfa.
+      LOOP AT lt_vbfa ASSIGNING <ls_vbfa>
+        WHERE vbelv EQ <ls_data>-vbeln
+          AND posnv EQ da_posnr.
+        APPEND <ls_vbfa> TO xvbfa.
+      ENDLOOP.
+      CALL FUNCTION 'RV_XVBAPF_CREATE'
+        EXPORTING
+          vbeln   = <ls_data>-vbeln
+        TABLES
+          fxvbfa  = xvbfa
+          fxvbapf = xvbapf.
+
+      IF xvbapf-vbeln NE <ls_data>-vbeln OR xvbapf-posnr NE <ls_data>-posnr.
+        LOOP AT xvbapf WHERE vbeln = <ls_data>-vbeln AND posnr = <ls_data>-posnr.
+          EXIT.
+        ENDLOOP.
+        IF sy-subrc NE 0.
+          CLEAR xvbapf.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+* Name des Auftraggebers lesen (in KNA1)
+    PERFORM partnername_lesen USING <ls_data>-kunnr space.
+
+* Daten übergeben
+    MOVE-CORRESPONDING <ls_data> TO postab.
+    postab-name1 = kna1-name1.
+    IF <ls_data>-lprio IS INITIAL.
+      postab-lprio      = '99'.
+    ENDIF.
+
+* POSTAB-Werte bei Zulieferabwicklung ermitteln
+    IF NOT <ls_data>-abdis IS INITIAL.
+      PERFORM postab_values_supp TABLES xvbep
+                                        xvbfa
+                                 USING postab-olfmng
+                                       postab-lfdat_1
+                                       postab-kwmeng
+                                       postab-kbmeng.
+    ELSE.
+* Errechnung der noch offenen Menge und des ersten Lieferdatums
+      IF <ls_data>-kzfme IS INITIAL.
+        postab-olfmng = ( xvbapf-erlmenge  + xvbapf-erlmenge_l ) * quan_1
+                      * <ls_data>-umvkn / <ls_data>-umvkz.
+      ELSE.
+        postab-olfmng = ( xvbapf-erlmengev + xvbapf-erlmengelv ) * quan_1.
+      ENDIF.
+      postab-olfmng       = postab-olfmng - da_pssum.
+      IF NOT da_pssum IS INITIAL.
+        CHECK postab-olfmng > 0.
+      ENDIF.
+      da_omeng            = postab-olfmng.
+
+* Offene Menge berechnen: bei fixierten Aufträgen aus bestätigter Menge
+      IF <ls_data>-fixmg NE space.
+        postab-olfmng       = postab-kbmeng - postab-olfmng.
+      ELSE.
+        postab-olfmng       = postab-kwmeng - postab-olfmng.
+      ENDIF.
+
+* Lieferdatum der 1. offenen Menge berechnen
+
+      LOOP AT xvbep WHERE cmeng > 0.
+        IF da_omeng GE xvbep-cmeng.
+          da_omeng        = da_omeng - xvbep-cmeng.
+        ELSE.
+          xvbep-cmeng     = xvbep-cmeng - da_omeng.
+          postab-lfdat_1  = xvbep-edatu.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+* nur relevante Belegpositionen mit offenen Mengen aus
+* Zulieferlieferplänen übernehmen
+    IF NOT <ls_data>-abdis IS INITIAL AND
+         postab-olfmng IS INITIAL.
+      CLEAR postab.
+    ELSE.
+* Senkrechter Trennstrich
+      postab-vline        = sy-vline.
+
+      DESCRIBE TABLE postab LINES da_lines."JOJO
+
+      postab-selkz = ' '.
+      postab-activ = '0'.
+      postab-zaehl = da_lines + 1.       "JOJO
+      APPEND postab.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.                    "POSTAB_AUFBAUEN
+*eject
+
+*---------------------------------------------------------------------*
+*       FORM POSTAB_NEU_FUELLEN                                       *
+*---------------------------------------------------------------------*
+*       Postab nachlesen, wenn sich die Zugriffstiefe verändert       *
+*---------------------------------------------------------------------*
+FORM postab_neu_fuellen.
+  PERFORM zugriffsart_vergleichen USING max-zuart
+                                        nachl.
+
+  IF nachl = space.
+    EXIT.
+  ELSE.
+*--------- POSTAB MERKEN IN XPOSTAB ----------------------------------*
+*   CALL FUNCTION 'SD_V03RB_POSITIONS'
+*        TABLES
+*             XV03RB = POSTAB.
+  ENDIF.
+ENDFORM.                    "POSTAB_NEU_FUELLEN
+*eject
+
+*&---------------------------------------------------------------------*
+*&      Form  POSTAB_VALUES_SUPP
+*&---------------------------------------------------------------------*
+*       Zulieferspezifische Ermittlung von POSTAB-Daten
+*----------------------------------------------------------------------*
+*      -->P_DA_XVBEP  text                                             *
+*      -->P_POSTAB-OLFMNG  text                                        *
+*      -->P_POSTAB-LFDAT_1  text                                       *
+*----------------------------------------------------------------------*
+FORM postab_values_supp TABLES p_xvbep STRUCTURE vbepvb
+                               p_xvbfa STRUCTURE vbfavb
+                        USING  p_postab-olfmng
+                               p_postab-lfdat_1
+                               p_postab-kwmeng
+                               p_postab-kbmeng.
+
+  DATA: p_xvbap          LIKE vbapvb OCCURS 0 WITH HEADER LINE,
+        p_xvbup          LIKE vbupvb OCCURS 0 WITH HEADER LINE,
+        da_bmeng_planned LIKE vbep-bmeng.
+
+  CLEAR: p_postab-olfmng,
+         p_postab-kwmeng,
+         p_postab-kbmeng,
+         p_postab-lfdat_1.
+
+* P_XVBAP aufbauen
+  p_xvbap = vbap.
+  APPEND p_xvbap.
+* P_XVBUP aufbauen
+  p_xvbup = vbup.
+  APPEND p_xvbup.
+
+* offene Mengen ermitteln
+  CALL FUNCTION 'RV_SCHEDULE_CHECK_DELIVERIES'
+    EXPORTING
+      fbeleg                  = vbap-vbeln
+      fposnr                  = vbap-posnr
+      fs073_alt               = 'X'
+    TABLES
+      fvbfa                   = p_xvbfa
+      fvbup                   = p_xvbup
+      fxvbep                  = p_xvbep
+      fvbap                   = p_xvbap
+    EXCEPTIONS
+      fehler_bei_lesen_fvbup  = 1
+      fehler_bei_lesen_fxvbep = 2
+                                OTHERS.
+* compute OLFMNG of ALL schedule lines, but KWMENG only from delivery
+* schedules and KBMENG from planned schedules, if there are some, if
+* not, take delivery schedules, too.              ( see note 483798 ! )
+  LOOP AT p_xvbep WHERE vbeln EQ vbap-vbeln AND
+                        posnr EQ vbap-posnr.
+    IF NOT p_xvbep-olfmng IS INITIAL.
+      IF p_postab-lfdat_1 IS INITIAL.
+        p_postab-lfdat_1 = p_xvbep-edatu.
+      ELSE.
+        IF p_xvbep-edatu LT p_postab-lfdat_1.
+          p_postab-lfdat_1 = p_xvbep-edatu.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+    p_postab-olfmng = p_postab-olfmng + p_xvbep-olfmng.
+    IF p_xvbep-abart = '1'.
+      p_postab-kwmeng = p_postab-kwmeng + p_xvbep-wmeng.
+      p_postab-kbmeng = p_postab-kbmeng + p_xvbep-bmeng.
+    ENDIF.
+    IF p_xvbep-abart = '5'.
+      da_bmeng_planned = da_bmeng_planned + p_xvbep-bmeng.
+    ENDIF.
+  ENDLOOP.
+  IF da_bmeng_planned GT 0.
+    p_postab-kbmeng = da_bmeng_planned.
+  ENDIF.
+
+
+ENDFORM.                               " POSTAB_VALUES_SUPP
+*eject
+
+*&---------------------------------------------------------------------*
+*&      Form  PROTOKOLL
+*&---------------------------------------------------------------------*
+FORM protokoll.
+  SET PF-STATUS 'PROT'.
+
+  LOOP AT news.
+    WRITE: / sy-vline,
+           2 news-vbeln NO-ZERO COLOR COL_KEY,
+           12 sy-vline,
+           13(67) news-text COLOR COL_NORMAL,
+           80 sy-vline.
+  ENDLOOP.
+  WRITE: /(80) sy-uline.
+
+ENDFORM.                               " PROTOKOLL
+
+*&---------------------------------------------------------------------*
+*&      Form  PROTOKOLL_HEADER
+*&---------------------------------------------------------------------*
+FORM protokoll_header.
+  WRITE: /(80) sy-uline.
+* WRITE: /(80) TEXT-TPR COLOR COL_HEADING.
+  WRITE:   1 sy-vline,
+           12 sy-vline,
+           80 sy-vline.
+  WRITE: /(80) sy-uline.
+ENDFORM.                               " PROTOKOLL_HEADER
+*&---------------------------------------------------------------------*
+*&      Form  PROTOKOLL_ERWEITERN
+*&---------------------------------------------------------------------*
+FORM protokoll_erweitern.
+  CALL FUNCTION 'MESSAGE_TEXT_BUILD'
+    EXPORTING
+      msgid               = sy-msgid
+      msgnr               = sy-msgno
+      msgv1               = sy-msgv1
+      msgv2               = sy-msgv2
+    IMPORTING
+      message_text_output = news-text.
+  news-vbeln   = fpostab-vbeln.
+  APPEND news.
+ENDFORM.                               " PROTOKOLL_ERWEITERN
+*&---------------------------------------------------------------------*
+*&      Form  ZUGRIFFSART_VERGLEICHEN
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->P_MAX_ZUART  text
+*      -->P_NACHL  text
+*----------------------------------------------------------------------*
+FORM zugriffsart_vergleichen  USING    p_max_zuart
+                                       p_nachl.
+
+  PERFORM zugriffsart_bestimmen USING anzgr ls-varnr.
+
+  IF sy-subrc = 0.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ZUGRIFFSART_BESTIMMEN
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->P_ANZGR  text
+*      -->P_LS_VARNR  text
+*----------------------------------------------------------------------*
+FORM zugriffsart_bestimmen  USING z01-anzgr z01-varnr..
+
+  SELECT SINGLE * FROM t180z
+     WHERE rname = sy-repid
+    AND   trvog = trvog
+     AND   anzgr = z01-anzgr
+     AND   varnr = z01-varnr.
+
+ENDFORM.
+
+
+
+
+
+***********************
+* BUILD FIELDS CATALOG
+***********************
+FORM build_field_catalog.
+  "  DATA : len TYPE i.
+  "    DATA: fieldcatalog TYPE slis_t_fieldcat_alv WITH HEADER LINE,
+  "      gd_layout    TYPE slis_layout_alv,
+  "      gd_repid     LIKE sy-repid,
+  "      g_save       TYPE C VALUE 'X',
+  "      g_variant    TYPE disvariant,
+  "      gx_variant   TYPE disvariant,
+  "      g_exit       TYPE C.
+
+
+  fieldcatalog-fieldname   = 'MATNR'.
+  fieldcatalog-seltext_m   = text-001.
+  DATA(label_len) = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 0.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO DATA(ls_field_len) WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  fieldcatalog-ref_tabname = 'MARA'.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'ARKTX'.
+  fieldcatalog-seltext_m   = text-002.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 1.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+  "BOC CR 1704 Ashish 14/11/25.
+  fieldcatalog-fieldname   = 'CUSTMAT'.
+  fieldcatalog-seltext_m   = text-026.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 2.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+  "EOC Ashish 14/11/25.
+
+  fieldcatalog-fieldname   = 'PR_TYPE'.
+  fieldcatalog-seltext_m   = text-017.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 3.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'PR_TYPE_DES'.
+  fieldcatalog-seltext_l   = text-018.
+  label_len = strlen( fieldcatalog-seltext_l ).
+  fieldcatalog-col_pos     = 4.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'GEOMETRY'.
+  fieldcatalog-seltext_m   = text-019.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 5.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'LINE_1_TECH'.
+  fieldcatalog-seltext_m   = text-020.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 6.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'LINE_2_SALES'.
+  fieldcatalog-seltext_m   = text-021.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 7.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'TYPE_1_TECH'.
+  fieldcatalog-seltext_m   = text-022.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 8.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'TYPE_2_SALES'.
+  fieldcatalog-seltext_m   = text-023.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 9.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'VBELN'.
+  fieldcatalog-seltext_m   = text-003.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 10.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'POSNR'.
+  fieldcatalog-seltext_m   = text-004.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 11.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+
+  fieldcatalog-just = 'L'.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'KUNNR'.
+  fieldcatalog-seltext_m   = text-005.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 12.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  fieldcatalog-key         = 'X'.
+  fieldcatalog-no_zero     = 'X'.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  fieldcatalog-fieldname   = 'NAME1'.
+  fieldcatalog-seltext_m   = text-006.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 13.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+  "BOC CR 1704 Ashish 14/11/2025.
+  fieldcatalog-fieldname   = 'SHIPTO'.
+  fieldcatalog-seltext_l   = text-024.
+  label_len = strlen( fieldcatalog-seltext_l ).
+  fieldcatalog-col_pos     = 14.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+  fieldcatalog-fieldname   = 'SHIPNAM'.
+  fieldcatalog-seltext_m   = text-025.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 15.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+  "EOC Ashish 14/11/2025.
+  fieldcatalog-fieldname   = 'BSTNK'.
+  fieldcatalog-seltext_m   = text-007.
+  label_len = strlen( fieldcatalog-seltext_m ).
+  fieldcatalog-col_pos     = 16.
+  fieldcatalog-outputlen   = label_len.
+  READ TABLE gt_field_len INTO ls_field_len WITH KEY fieldname = fieldcatalog-fieldname.
+  IF sy-subrc = 0 .
+    IF ls_field_len-outputlen GT label_len.
+      fieldcatalog-outputlen = ls_field_len-outputlen.
+    ENDIF.
+  ENDIF.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+  DESCRIBE FIELD ls_order-lfdat_1 LENGTH len IN CHARACTER MODE.
+  fieldcatalog-fieldname   = 'LFDAT_1'.
+  fieldcatalog-seltext_m   = text-008.
+  fieldcatalog-col_pos     = 17.
+  fieldcatalog-outputlen   = len.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+*  DESCRIBE FIELD ls_order-labst LENGTH len IN CHARACTER MODE.
+  fieldcatalog-fieldname   = 'LABST'.
+  fieldcatalog-seltext_l = text-027.
+  fieldcatalog-col_pos     = 18.
+  fieldcatalog-outputlen   = len.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+  " boc by samim
+  DESCRIBE FIELD ls_order-base_uom LENGTH len IN BYTE MODE.
+  fieldcatalog-fieldname   = 'BASE_UOM'.
+  fieldcatalog-seltext_m   = text-029.
+  fieldcatalog-col_pos     = 19.
+  fieldcatalog-outputlen   = len.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+  " eoc by samim
+  DESCRIBE FIELD ls_order-kwmeng LENGTH len IN BYTE MODE.
+  fieldcatalog-fieldname   = 'KWMENG'.
+  fieldcatalog-seltext_m   = text-009.
+  fieldcatalog-col_pos     = 20.
+  fieldcatalog-outputlen   = len.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  DESCRIBE FIELD ls_order-kbmeng LENGTH len IN BYTE MODE.
+  fieldcatalog-fieldname   = 'KBMENG'.
+  fieldcatalog-seltext_m   = text-010.
+  fieldcatalog-col_pos     = 21.
+  fieldcatalog-outputlen   = len.
+  fieldcatalog-key         = 'X'.
+  fieldcatalog-no_zero     = 'X'.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+  DESCRIBE FIELD ls_order-olfmng LENGTH len IN BYTE MODE.
+  fieldcatalog-fieldname   = 'OLFMNG'.
+  fieldcatalog-seltext_m   = text-011.
+  fieldcatalog-col_pos     = 22.
+  fieldcatalog-outputlen   = len.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+
+  DESCRIBE FIELD ls_order-vrkme LENGTH len IN CHARACTER MODE.
+  fieldcatalog-fieldname   = 'VRKME'.
+  fieldcatalog-seltext_m   = text-012.
+  fieldcatalog-col_pos     = 23.
+  fieldcatalog-outputlen   = len.
+  fieldcatalog-do_sum      = 'X'.
+  fieldcatalog-no_zero     = 'X'.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+  DESCRIBE FIELD ls_order-netwr LENGTH len IN BYTE MODE.
+  fieldcatalog-fieldname   = 'NETWR'.
+  fieldcatalog-seltext_m   = text-014.
+  fieldcatalog-col_pos     = 24.
+  fieldcatalog-outputlen   = len.
+  fieldcatalog-do_sum      = 'X'.
+  fieldcatalog-no_zero     = 'X'.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+  DESCRIBE FIELD ls_order-opnpr LENGTH len IN BYTE MODE.
+  fieldcatalog-fieldname   = 'OPNPR'.
+  fieldcatalog-seltext_m   = text-015.
+  fieldcatalog-col_pos     = 25.
+  fieldcatalog-outputlen   = len.
+  fieldcatalog-do_sum      = 'X'.
+  fieldcatalog-no_zero     = 'X'.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+
+  "BOC CR 1704 Ashish 14/11/25.
+  DESCRIBE FIELD ls_order-invqty LENGTH len IN BYTE MODE.
+  fieldcatalog-fieldname   = 'INVQTY'.
+  fieldcatalog-seltext_m   = text-028.
+  fieldcatalog-col_pos     = 26.
+  fieldcatalog-outputlen   = len.
+  fieldcatalog-do_sum      = 'X'.
+  fieldcatalog-no_zero     = 'X'.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+  "EOC Ashish 14/11/25.
+
+  DESCRIBE FIELD ls_order-waerk LENGTH len IN CHARACTER MODE.
+  fieldcatalog-fieldname   = 'WAERK'.
+  fieldcatalog-seltext_m   = text-016.
+  fieldcatalog-col_pos     = 27.
+  fieldcatalog-outputlen   = len.
+  fieldcatalog-do_sum      = 'X'.
+  fieldcatalog-no_zero     = 'X'.
+  APPEND fieldcatalog TO fieldcatalog.
+  CLEAR  fieldcatalog.
+ENDFORM.
+
+
+***************
+* BUILD LAYOUT
+***************
+FORM build_layout.
+  gd_layout-no_input          = 'X'.
+  gd_layout-colwidth_optimize = 'X'.
+  gd_layout-totals_text       = 'Totals'(201).
+  gd_layout-totals_only       = 'X'.
+  gd_layout-zebra             = 'X'.
+ENDFORM.
+
+
+**************
+* DISPLAY ALV
+**************
+FORM display_alv.
+  gd_repid = sy-repid.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program      = gd_repid
+      i_callback_top_of_page  = 'TOP-OF-PAGE'
+      i_callback_user_command = 'USER_COMMAND'
+      it_fieldcat             = fieldcatalog[]
+      i_save                  = 'X'
+      is_variant              = g_variant
+    TABLES
+      t_outtab                = outtable
+    EXCEPTIONS
+      program_error           = 1
+      OTHERS                  = 2.
+  IF sy-subrc <> 0.
+*   MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+*           WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+  ENDIF.
+ENDFORM.
+
+
+**************
+* TOP OF PAGE
+**************
+FORM top-of-page.
+  "************
+  " ALV HEADER
+  "************
+  DATA: t_header      TYPE slis_t_listheader,
+        wa_header     TYPE slis_listheader,
+        t_line        LIKE wa_header-info,
+        ld_lines      TYPE i,
+        ld_linesc(10) TYPE c.
+
+  "*******
+  " TITLE
+  "*******
+  wa_header-typ  = 'H'.
+*  wa_header-info = 'Order Scheduled Report'."commented by samim
+  wa_header-info = text-030."added by samim
+  APPEND wa_header TO t_header.
+  CLEAR wa_header.
+
+  "******
+  " DATE
+  "******
+  wa_header-typ = 'S'.
+  wa_header-key = 'Date: '.
+  CONCATENATE  sy-datum+6(2) '.'
+               sy-datum+4(2) '.'
+               sy-datum(4) INTO wa_header-info.   "todays date
+  APPEND wa_header TO t_header.
+  CLEAR: wa_header.
+
+  CALL FUNCTION 'REUSE_ALV_COMMENTARY_WRITE'
+    EXPORTING
+      it_list_commentary = t_header.
+ENDFORM.
+
+
+***************
+* USER COMMAND
+***************
+FORM user_command USING ucomm TYPE sy-ucomm
+                        selfield TYPE slis_selfield.
+  CASE ucomm.
+    WHEN '&IC1'.
+      READ TABLE outtable INTO ls_order INDEX selfield-tabindex.
+      IF sy-subrc EQ 0.
+        IF selfield-fieldname = 'MATNR' .
+          SET PARAMETER ID 'MAT' FIELD ls_order-matnr.
+          CALL TRANSACTION 'MM03' AND SKIP FIRST SCREEN.
+        ENDIF.
+        IF selfield-fieldname = 'VBELN' .
+
+          AUTHORITY-CHECK OBJECT 'S_TCODE' ID 'TCD' FIELD 'VA03'.
+          IF sy-subrc EQ 0.
+            SET PARAMETER ID 'AUN' FIELD ls_order-vbeln.
+            CALL TRANSACTION 'VA03' AND SKIP FIRST SCREEN.
+          ELSE.
+            MESSAGE e208(00) WITH text-013.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+  ENDCASE.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_FILL_TAB_FIELD_LEN
+*&---------------------------------------------------------------------*
+FORM f_fill_tab_field_len  USING    i_outtab
+                           CHANGING ct_field_len TYPE ty_t_field_len.
+  DATA lo_rtti_struct TYPE REF TO cl_abap_structdescr.
+  DATA(lo_typedescr) = cl_abap_structdescr=>describe_by_data( i_outtab ).
+  IF ( lo_typedescr->kind = cl_abap_typedescr=>kind_struct ).
+    lo_rtti_struct ?= lo_typedescr.
+    DATA(lt_dfies) = cl_salv_data_descr=>read_structdescr( lo_rtti_struct ).
+  ENDIF.
+
+  LOOP AT lt_dfies INTO DATA(ls_dfies).
+    ASSIGN COMPONENT ls_dfies-fieldname OF STRUCTURE i_outtab TO FIELD-SYMBOL(<fs_field>).
+    IF <fs_field> IS ASSIGNED.
+      CHECK ls_dfies-datatype = 'CHAR'.
+      READ TABLE ct_field_len ASSIGNING FIELD-SYMBOL(<fs_field_len>) WITH KEY fieldname = ls_dfies-fieldname.
+      IF sy-subrc = 0.
+        DATA(len) = strlen( <fs_field> ).
+        IF <fs_field_len>-outputlen LT len.
+          <fs_field_len>-outputlen = len.
+        ENDIF.
+        UNASSIGN <fs_field_len>.
+      ELSE.
+        APPEND INITIAL LINE TO ct_field_len ASSIGNING <fs_field_len>.
+        IF <fs_field_len> IS ASSIGNED.
+          <fs_field_len>-fieldname = ls_dfies-fieldname.
+          <fs_field_len>-outputlen = strlen( <fs_field> ).
+          UNASSIGN <fs_field_len>.
+        ENDIF.
+      ENDIF.
+      UNASSIGN <fs_field>.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.
