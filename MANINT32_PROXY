@@ -1,0 +1,382 @@
+  METHOD zxiii_buffer_data_trascar_uk_a~buffer_data_trascar_uk_async_i.
+*** **** INSERT IMPLEMENTATION HERE **** ***
+***********************************************************************
+**                    A D M I N I S T R A T I O N                     *
+***********************************************************************
+**  Program ID        :  ZXIII_BUFFER_DATA_TRASCAR_UK_A               *
+**  Version           : 1.0                                           *
+**  SAP Version       : ECC 6.0                                       *
+**  Program Name      : ZXIII_BUFFER_DATA_TRASCAR_UK_A                *
+**  Created by        :  Samim Akther                                 *
+**  Created on        : 27.01.2026                                    *
+**  Description       : Buffer Interface TRASCAR sends data to SAP    *
+***********************************************************************
+
+    CONSTANTS:  gc_progname TYPE progname VALUE 'ZLIIN_BUF',
+                gc_name     TYPE rvari_vnam VALUE 'ZBUF_BUFFERNUM-',
+                gc_type_s   TYPE rsscr_kind VALUE 'S',
+                gc_event    TYPE huwbevent VALUE '0006',
+                gc_code     TYPE sytcode VALUE 'VLMOVE',
+                gc_wait     TYPE bapita-wait VALUE 'X',
+                gc_e        TYPE symsgty VALUE 'E',
+                gc_a        TYPE symsgty VALUE 'A',
+                gc_sign     TYPE sign VALUE 'I',
+                gc_option   TYPE option VALUE 'EQ'.
+
+
+    TYPES: BEGIN OF ty_buffer_data,
+             progressive_num TYPE string,    " Progressive Number (25 digits)
+             buffer_num      TYPE string,   " Buffer Number (Vertical storage)
+             boxid_raw       TYPE char25,    " Box ID (full from file)
+             quality_flag    TYPE char1,     " Flag for quality block
+             quality_code    TYPE char3,     " Quality block code (e.g., QIR)
+             inhalt_part     TYPE inhalt,    " First 6 chars of Box ID
+             exidv2_part     TYPE exidv,     " Remaining chars of Box ID
+           END OF ty_buffer_data.
+
+    TYPES : BEGIN OF ty_temp_box,
+              inhalt_part TYPE inhalt,    " First 6 chars of Box ID
+              exidv2_part TYPE exidv,     " Remaining chars of Box ID
+            END OF ty_temp_box.
+
+    DATA : lt_temp_box TYPE TABLE OF ty_temp_box,
+           ls_temp_box TYPE ty_temp_box.
+
+    DATA: lt_buffer_data      TYPE STANDARD TABLE OF ty_buffer_data,
+          ls_buffer_data      TYPE ty_buffer_data,
+          lt_fields           TYPE STANDARD TABLE OF string,
+          lv_count            TYPE i,
+          lt_lgort_check      TYPE TABLE OF hrranges,
+          it_move_to          TYPE  hum_data_move_to_t,
+          it_external_id      TYPE  hum_exidv_t,
+          lv_posted           TYPE  sysubrc,
+          ls_message          TYPE  huitem_messages,
+          lt_messages         TYPE  huitem_messages_t,
+          ls_emkpf            TYPE  emkpf,
+          lt_buffer           TYPE zxibuffer_data_row_tab,
+          lw_standard         TYPE zxiexchange_fault_data,
+          s_input_row         TYPE zxipalscn_box_row,
+          lv_line             TYPE string,
+          lv_date             TYPE string,
+          lv_time             TYPE string,
+          lv_line_productline TYPE string,
+          lv_rowdata          TYPE string,
+          lv_name             TYPE rvari_vnam,
+          lr_aufnr            TYPE RANGE OF aufnr.
+    FIELD-SYMBOLS: <fs_move_to>     TYPE hum_data_move_to,
+                   <fs_external_id> TYPE hum_exidv.
+
+    data lv_aufnr_app TYPE aufk-aufnr. "FM 2026.03.05
+
+    lt_buffer = input-buffer_data-row.
+
+    IF lt_buffer IS NOT INITIAL.
+      LOOP AT lt_buffer INTO DATA(ls_buffer).
+        CLEAR lt_fields.
+        SPLIT ls_buffer-rowdata AT ';' INTO TABLE lt_fields.
+
+        READ TABLE lt_fields INDEX 1 INTO ls_buffer_data-progressive_num.
+        READ TABLE lt_fields INDEX 2 INTO ls_buffer_data-buffer_num.
+        READ TABLE lt_fields INDEX 3 INTO ls_buffer_data-boxid_raw.
+        READ TABLE lt_fields INDEX 4 INTO ls_buffer_data-quality_flag.
+        READ TABLE lt_fields INDEX 5 INTO ls_buffer_data-quality_code.
+
+        IF ls_buffer_data-boxid_raw IS NOT INITIAL.
+          ls_buffer_data-inhalt_part = ls_buffer_data-boxid_raw(6).   " First 6 chars
+          ls_buffer_data-exidv2_part = ls_buffer_data-boxid_raw+6.    " Remaining chars
+        ENDIF.
+
+        APPEND ls_buffer_data TO lt_buffer_data.
+
+        CLEAR: ls_buffer.
+      ENDLOOP.
+      CLEAR: ls_buffer_data,
+             lt_buffer,
+             lt_fields.
+
+      IF lt_buffer_data IS NOT INITIAL.
+        SORT lt_buffer_data BY inhalt_part exidv2_part.
+        SELECT venum,exidv,inhalt,exidv2 FROM vekp INTO TABLE @DATA(lt_vekp)
+          FOR ALL ENTRIES IN @lt_buffer_data
+           WHERE inhalt = @lt_buffer_data-inhalt_part
+           AND   exidv2 = @lt_buffer_data-exidv2_part.
+
+        IF sy-subrc = 0.
+          SORT lt_vekp BY venum.
+          SELECT venum , vepos,vemng,vemeh,matnr,charg,werks,lgort,bestq FROM vepo INTO TABLE
+          @DATA(lt_vepo) FOR ALL ENTRIES IN @lt_vekp
+          WHERE venum = @lt_vekp-venum.
+          IF sy-subrc = 0.
+            SORT lt_vepo BY venum.
+          ENDIF.
+        ENDIF.
+
+        CLEAR : lr_aufnr.
+        LOOP AT lt_buffer_data INTO DATA(ls_buff_data).
+          APPEND VALUE #( sign = gc_sign option = gc_option low = |{ ls_buff_data-inhalt_part ALPHA = IN }| ) TO lr_aufnr.
+        ENDLOOP.
+        DELETE ADJACENT DUPLICATES FROM lr_aufnr COMPARING low.
+
+        SELECT aufnr,erdat,werks FROM aufk INTO TABLE @DATA(lt_aufk)
+           WHERE aufnr IN @lr_aufnr.
+        IF lt_aufk is NOT INITIAL.
+          SORT lt_aufk BY aufnr.
+        ENDIF.
+      ENDIF.
+
+      SORT lt_vekp BY inhalt exidv2.
+      CLEAR : ls_buffer_data , lt_temp_box , ls_temp_box.
+
+      LOOP AT lt_buffer_data INTO ls_buffer_data.
+        READ TABLE lt_vekp WITH KEY inhalt = ls_buffer_data-inhalt_part
+                                    exidv2 = ls_buffer_data-exidv2_part
+                                    INTO DATA(ls_vekp) BINARY SEARCH.
+        IF sy-subrc = 0.
+          READ TABLE lt_vepo WITH KEY venum = ls_vekp-venum INTO DATA(ls_vepo) BINARY SEARCH.
+          IF sy-subrc = 0.
+            lv_name = |{ gc_name }{ ls_vepo-lgort }|.
+            CLEAR lt_lgort_check.
+            CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+              EXPORTING
+                i_progname      = gc_progname
+                i_name          = lv_name
+                i_type          = gc_type_s
+              TABLES
+                it_hrranges     = lt_lgort_check
+              EXCEPTIONS
+                wrong_type      = 1
+                wrong_value     = 2
+                inchoerent_type = 3
+                OTHERS          = 4.
+
+            IF sy-subrc = 0 AND lt_lgort_check IS NOT INITIAL.
+              SORT lt_lgort_check BY high.
+              READ TABLE lt_lgort_check WITH KEY high = ls_buffer_data-buffer_num
+                         INTO DATA(ls_lgort_check) BINARY SEARCH.
+
+              IF sy-subrc = 0 AND ls_lgort_check-low NE ls_vepo-lgort.
+
+                CLEAR: it_move_to,
+                       it_external_id,
+                       lt_messages,
+                       ls_message,
+                       lv_posted,
+                       ls_emkpf.
+                UNASSIGN: <fs_move_to>,
+                          <fs_external_id>.
+
+                APPEND INITIAL LINE TO it_move_to ASSIGNING <fs_move_to>.
+                <fs_move_to>-matnr = ls_vepo-matnr.
+                <fs_move_to>-charg = ls_vepo-charg.
+                <fs_move_to>-werks = ls_vepo-werks.
+                <fs_move_to>-lgort = ls_lgort_check-low.
+
+                APPEND INITIAL LINE TO it_external_id ASSIGNING <fs_external_id>.
+                <fs_external_id>-exidv = ls_vekp-exidv.
+
+                CALL FUNCTION 'HU_CREATE_GOODS_MOVEMENT'
+                  EXPORTING
+                    if_event       = gc_event
+                    if_tcode       = gc_code
+                    it_move_to     = it_move_to
+                    it_external_id = it_external_id
+                  IMPORTING
+                    ef_posted      = lv_posted
+                    es_message     = ls_message
+                    et_messages    = lt_messages
+                    es_emkpf       = ls_emkpf.
+
+                DATA(lv_has_error) = abap_false.
+                "  Single message structure
+                IF ls_message-msgty = gc_e OR ls_message-msgty = gc_a.
+                  lv_has_error = abap_true.
+                ELSE.
+                  " Table messages
+                  IF line_exists( lt_messages[ msgty = gc_e ] )
+                     OR line_exists( lt_messages[ msgty = gc_a ] ).
+                    lv_has_error = abap_true.
+                  ENDIF.
+                ENDIF.
+
+                IF lv_has_error = abap_true.
+                  CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+                ELSE.
+                  CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+                    EXPORTING
+                      wait = gc_wait.
+                ENDIF.
+
+                CLEAR: it_move_to,
+                       it_external_id,
+                       lt_messages,
+                       ls_message,
+                       lv_posted,
+                       ls_emkpf,
+                       lv_has_error.
+                UNASSIGN: <fs_move_to>,
+                          <fs_external_id>.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        ELSE.
+          "--> FM 2026.03.05
+          CLEAR lv_aufnr_app.
+          lv_aufnr_app = ls_buffer_data-inhalt_part.
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+            EXPORTING
+              input         = lv_aufnr_app
+           IMPORTING
+             OUTPUT        = lv_aufnr_app
+                    .
+          READ TABLE lt_aufk INTO DATA(ls_aufk) WITH KEY aufnr = lv_aufnr_app BINARY SEARCH.
+          "<-- FM 2026.03.05
+          IF sy-subrc = 0.
+            lv_line       = ls_buffer_data-boxid_raw.
+            lv_date       = lv_line+13(6).
+            lv_time       = lv_line+19(6).
+            lv_line_productline = lv_line+6(2).
+            DATA(lv_year) = ls_aufk-erdat(2).
+
+            lv_date = lv_year && lv_date+4(2) && lv_date+2(2)  && lv_date+0(2).
+            lv_rowdata = lv_date && ';' && lv_time && ';' && lv_line_productline && ';' && lv_line && ';'
+             && ls_buffer_data-quality_flag && ';' && ls_buffer_data-quality_code && ';'.
+
+            s_input_row-werks   = ls_aufk-werks.
+            s_input_row-rowdata = lv_rowdata.
+            CALL FUNCTION 'ZLIN_UTIT_BRO_UK'
+              EXPORTING
+                st_rowdata = s_input_row
+              IMPORTING
+                error_msg  = lw_standard.
+            IF sy-subrc = 0.
+              ls_temp_box-inhalt_part = ls_buffer_data-inhalt_part.
+              ls_temp_box-exidv2_part = ls_buffer_data-exidv2_part.
+              APPEND ls_temp_box TO lt_temp_box.
+              CLEAR ls_temp_box.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      IF lt_temp_box IS NOT INITIAL.
+        SORT lt_temp_box BY inhalt_part exidv2_part.
+        DELETE ADJACENT DUPLICATES FROM lt_temp_box COMPARING inhalt_part exidv2_part.
+      ENDIF.
+      IF lt_temp_box IS NOT INITIAL.
+        SELECT venum, exidv, inhalt, exidv2
+                FROM vekp
+      INTO TABLE @DATA(lt_vekp1)
+      FOR ALL ENTRIES IN @lt_temp_box
+              WHERE inhalt = @lt_temp_box-inhalt_part
+              AND   exidv2 = @lt_temp_box-exidv2_part.
+
+        IF sy-subrc = 0.
+          SELECT venum, vepos, vemng, vemeh, matnr, charg, werks, lgort, bestq
+            FROM vepo
+            INTO TABLE @DATA(lt_vepo1)
+            FOR ALL ENTRIES IN @lt_vekp1
+            WHERE venum = @lt_vekp1-venum.
+
+          IF sy-subrc = 0.
+            SORT: lt_vepo1 BY venum,
+                  lt_vekp1 BY inhalt exidv2.
+
+            LOOP AT lt_temp_box ASSIGNING FIELD-SYMBOL(<fs_temp_box>).
+              READ TABLE lt_vekp1 ASSIGNING FIELD-SYMBOL(<fs_vekp1>)
+               WITH KEY inhalt = <fs_temp_box>-inhalt_part
+                        exidv2 = <fs_temp_box>-exidv2_part BINARY SEARCH.
+              IF sy-subrc = 0.
+                READ TABLE lt_vepo1 ASSIGNING FIELD-SYMBOL(<fs_vepo1>) WITH KEY venum = <fs_vekp1>-venum BINARY SEARCH.
+                IF sy-subrc = 0.
+                  lv_name = |{ gc_name }{ <fs_vepo1>-lgort }|.
+                  CLEAR lt_lgort_check.
+                  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+                    EXPORTING
+                      i_progname      = gc_progname
+                      i_name          = lv_name
+                      i_type          = gc_type_s
+                    TABLES
+                      it_hrranges     = lt_lgort_check
+                    EXCEPTIONS
+                      wrong_type      = 1
+                      wrong_value     = 2
+                      inchoerent_type = 3
+                      OTHERS          = 4.
+
+                  IF sy-subrc = 0 AND lt_lgort_check IS NOT INITIAL.
+                    CLEAR: ls_lgort_check.
+                    ls_lgort_check = lt_lgort_check[ 1 ].
+
+                    IF sy-subrc = 0 AND ls_lgort_check-low NE <fs_vepo1>-lgort.
+
+                      CLEAR: it_move_to,
+                             it_external_id,
+                             lt_messages,
+                             ls_message,
+                             lv_posted,
+                             ls_emkpf.
+                      UNASSIGN: <fs_move_to>,
+                                <fs_external_id>.
+
+                      APPEND INITIAL LINE TO it_move_to ASSIGNING <fs_move_to>.
+                      <fs_move_to>-matnr = <fs_vepo1>-matnr.
+                      <fs_move_to>-charg = <fs_vepo1>-charg.
+                      <fs_move_to>-werks = <fs_vepo1>-werks.
+                      <fs_move_to>-lgort = ls_lgort_check-low.
+
+                      APPEND INITIAL LINE TO it_external_id ASSIGNING <fs_external_id>.
+                      <fs_external_id>-exidv = <fs_vekp1>-exidv.
+                      CALL FUNCTION 'HU_CREATE_GOODS_MOVEMENT'
+                        EXPORTING
+                          if_event       = gc_event
+                          if_tcode       = gc_code
+                          it_move_to     = it_move_to
+                          it_external_id = it_external_id
+                        IMPORTING
+                          ef_posted      = lv_posted
+                          es_message     = ls_message
+                          et_messages    = lt_messages
+                          es_emkpf       = ls_emkpf.
+
+                      lv_has_error = abap_false.
+                      "  Single message structure
+                      IF ls_message-msgty = gc_e OR ls_message-msgty = gc_a.
+                        lv_has_error = abap_true.
+                      ELSE.
+                        " Table messages
+                        IF line_exists( lt_messages[ msgty = gc_e ] )
+                           OR line_exists( lt_messages[ msgty = gc_a ] ).
+                          lv_has_error = abap_true.
+                        ENDIF.
+                      ENDIF.
+
+                      IF lv_has_error = abap_true.
+                        CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+                      ELSE.
+                        CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+                          EXPORTING
+                            wait = gc_wait.
+                      ENDIF.
+
+                      CLEAR: it_move_to,
+                             it_external_id,
+                             lt_messages,
+                             ls_message,
+                             lv_posted,
+                             ls_emkpf,
+                             lv_has_error,
+                             ls_vekp,
+                             ls_vepo.
+                      UNASSIGN: <fs_move_to>,
+                                <fs_external_id>.
+
+                    ENDIF.
+                  ENDIF.
+                ENDIF.
+              ENDIF.
+            ENDLOOP.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
