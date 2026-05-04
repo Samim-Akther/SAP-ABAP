@@ -1,0 +1,2818 @@
+here we have done some bapi and bdc work but further process we have found a user exit and a fm and through this i have achieved thi
+here user want to delete all the data that is in md62.
+Customer enhancement projects
+
+    ZM60E002
+    functionexit - 
+
+
+--------------------
+REPORT zpl_loading_forecast MESSAGE-ID zc_ftd_pp.
+
+***--- Database and Structures ---**************************************
+TABLES: sscrfields.
+TYPE-POOLS: slis, icon.
+
+***--- Selection Screen ---*********************************************
+*SELECTION-SCREEN BEGIN OF LINE.
+*SELECTION-SCREEN PUSHBUTTON 01(15) manual USER-COMMAND man.
+*SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-t01.
+PARAMETERS: p_file TYPE string MEMORY ID file_int.
+SELECTION-SCREEN END OF BLOCK b1.
+
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE text-t02.
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT 1(10) text-p01 FOR FIELD p_start.
+PARAMETERS: p_start TYPE sy-datum.
+SELECTION-SCREEN COMMENT 26(10) text-p02 FOR FIELD p_end.
+PARAMETERS: p_end TYPE sy-datum.
+SELECTION-SCREEN END OF LINE.
+
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT 1(20) text-p03 FOR FIELD p_type.
+PARAMETERS: p_type TYPE rm60x-entlu DEFAULT 'M' OBLIGATORY.
+SELECTION-SCREEN POSITION 25.
+PARAMETERS: p_typec(10) DEFAULT text-mon.
+SELECTION-SCREEN COMMENT 40(15) text-p08 FOR FIELD p_choose.
+PARAMETERS: p_choose TYPE zpl_start_end OBLIGATORY DEFAULT '1'.
+SELECTION-SCREEN POSITION 59.
+PARAMETERS: p_choos(20) DEFAULT text-sta.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN END OF BLOCK b2.
+SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE text-t03.
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT 1(15) text-p04 FOR FIELD p_versb.
+PARAMETERS p_versb TYPE rm60x-versb DEFAULT 'Z1' OBLIGATORY.
+SELECTION-SCREEN COMMENT 26(20) text-p05.
+PARAMETERS: rb_act RADIOBUTTON GROUP g1 DEFAULT 'X'.
+SELECTION-SCREEN COMMENT 49(10) text-p06 FOR FIELD rb_act.
+PARAMETERS: rb_sim RADIOBUTTON GROUP g1.
+SELECTION-SCREEN COMMENT 63(10) text-p07 FOR FIELD rb_sim.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN END OF BLOCK b3.
+PARAMETERS: p_kdmat AS CHECKBOX DEFAULT space.
+PARAMETERS: p_werks TYPE t001w-werks,
+            p_pbdnr TYPE pbdnr.
+SELECTION-SCREEN SKIP.
+PARAMETERS cb_test AS CHECKBOX.
+
+***--- Working Storage ---**********************************************
+DATA : file_path(255) TYPE c,
+       file_name(255) TYPE c,
+       gv_buckets     TYPE i,
+       BEGIN OF gt_file OCCURS 0,
+         matnr(18),
+         meins(3),
+         q1(13)    TYPE n,
+         q2(13)    TYPE n,
+         q3(13)    TYPE n,
+         q4(13)    TYPE n,
+         q5(13)    TYPE n,
+         q6(13)    TYPE n,
+         q7(13)    TYPE n,
+         q8(13)    TYPE n,
+         q9(13)    TYPE n,
+         q10(13)   TYPE n,
+         q11(13)   TYPE n,
+         q12(13)   TYPE n,
+         q13(13)   TYPE n,
+         q14(13)   TYPE n,
+         q15(13)   TYPE n,
+         q16(13)   TYPE n,
+         q17(13)   TYPE n,
+         q18(13)   TYPE n,
+         q19(13)   TYPE n,
+         q20(13)   TYPE n,
+         q21(13)   TYPE n,
+         q22(13)   TYPE n,
+         q23(13)   TYPE n,
+         q24(13)   TYPE n,
+         q25(13)   TYPE n,
+         q26(13)   TYPE n,
+         q27(13)   TYPE n,
+         q28(13)   TYPE n,
+         q29(13)   TYPE n,
+         q30(13)   TYPE n,
+         q31(13)   TYPE n,
+         q32(13)   TYPE n,
+         q33(13)   TYPE n,
+         q34(13)   TYPE n,
+         q35(13)   TYPE n,
+         q36(13)   TYPE n,
+         q37(13)   TYPE n,
+         q38(13)   TYPE n,
+         q39(13)   TYPE n,
+         q40(13)   TYPE n,
+         q41(13)   TYPE n,
+         q42(13)   TYPE n,
+         q43(13)   TYPE n,
+         q44(13)   TYPE n,
+         q45(13)   TYPE n,
+         q46(13)   TYPE n,
+         q47(13)   TYPE n,
+         q48(13)   TYPE n,
+         q49(13)   TYPE n,
+         q50(13)   TYPE n,
+         q51(13)   TYPE n,
+         q52(13)   TYPE n,
+         q53(13)   TYPE n,
+         q54(13)   TYPE n,
+         q55(13)   TYPE n,
+         q56(13)   TYPE n,
+         q57(13)   TYPE n,
+         q58(13)   TYPE n,
+         q59(13)   TYPE n,
+         q60(13)   TYPE n,
+       END OF gt_file,
+       BEGIN OF gt_alv OCCURS 0,
+         sem(4),
+         matnr(18),
+         meins(3),
+         q1(13)    TYPE n,
+         q2(13)    TYPE n,
+         q3(13)    TYPE n,
+         q4(13)    TYPE n,
+         q5(13)    TYPE n,
+         q6(13)    TYPE n,
+         q7(13)    TYPE n,
+         q8(13)    TYPE n,
+         q9(13)    TYPE n,
+         q10(13)   TYPE n,
+         q11(13)   TYPE n,
+         q12(13)   TYPE n,
+         q13(13)   TYPE n,
+         q14(13)   TYPE n,
+         q15(13)   TYPE n,
+         q16(13)   TYPE n,
+         q17(13)   TYPE n,
+         q18(13)   TYPE n,
+         q19(13)   TYPE n,
+         q20(13)   TYPE n,
+         q21(13)   TYPE n,
+         q22(13)   TYPE n,
+         q23(13)   TYPE n,
+         q24(13)   TYPE n,
+         q25(13)   TYPE n,
+         q26(13)   TYPE n,
+         q27(13)   TYPE n,
+         q28(13)   TYPE n,
+         q29(13)   TYPE n,
+         q30(13)   TYPE n,
+         q31(13)   TYPE n,
+         q32(13)   TYPE n,
+         q33(13)   TYPE n,
+         q34(13)   TYPE n,
+         q35(13)   TYPE n,
+         q36(13)   TYPE n,
+         q37(13)   TYPE n,
+         q38(13)   TYPE n,
+         q39(13)   TYPE n,
+         q40(13)   TYPE n,
+         q41(13)   TYPE n,
+         q42(13)   TYPE n,
+         q43(13)   TYPE n,
+         q44(13)   TYPE n,
+         q45(13)   TYPE n,
+         q46(13)   TYPE n,
+         q47(13)   TYPE n,
+         q48(13)   TYPE n,
+         q49(13)   TYPE n,
+         q50(13)   TYPE n,
+         q51(13)   TYPE n,
+         q52(13)   TYPE n,
+         q53(13)   TYPE n,
+         q54(13)   TYPE n,
+         q55(13)   TYPE n,
+         q56(13)   TYPE n,
+         q57(13)   TYPE n,
+         q58(13)   TYPE n,
+         q59(13)   TYPE n,
+         q60(13)   TYPE n,
+         mess(220),
+       END OF gt_alv,
+       BEGIN OF gs_datum OCCURS 0,
+         d1  TYPE sy-datum,
+         d2  TYPE sy-datum,
+         d3  TYPE sy-datum,
+         d4  TYPE sy-datum,
+         d5  TYPE sy-datum,
+         d6  TYPE sy-datum,
+         d7  TYPE sy-datum,
+         d8  TYPE sy-datum,
+         d9  TYPE sy-datum,
+         d10 TYPE sy-datum,
+         d11 TYPE sy-datum,
+         d12 TYPE sy-datum,
+         d13 TYPE sy-datum,
+         d14 TYPE sy-datum,
+         d15 TYPE sy-datum,
+         d16 TYPE sy-datum,
+         d17 TYPE sy-datum,
+         d18 TYPE sy-datum,
+         d19 TYPE sy-datum,
+         d20 TYPE sy-datum,
+         d21 TYPE sy-datum,
+         d22 TYPE sy-datum,
+         d23 TYPE sy-datum,
+         d24 TYPE sy-datum,
+         d25 TYPE sy-datum,
+         d26 TYPE sy-datum,
+         d27 TYPE sy-datum,
+         d28 TYPE sy-datum,
+         d29 TYPE sy-datum,
+         d30 TYPE sy-datum,
+         d31 TYPE sy-datum,
+         d32 TYPE sy-datum,
+         d33 TYPE sy-datum,
+         d34 TYPE sy-datum,
+         d35 TYPE sy-datum,
+         d36 TYPE sy-datum,
+         d37 TYPE sy-datum,
+         d38 TYPE sy-datum,
+         d39 TYPE sy-datum,
+         d40 TYPE sy-datum,
+         d41 TYPE sy-datum,
+         d42 TYPE sy-datum,
+         d43 TYPE sy-datum,
+         d44 TYPE sy-datum,
+         d45 TYPE sy-datum,
+         d46 TYPE sy-datum,
+         d47 TYPE sy-datum,
+         d48 TYPE sy-datum,
+         d49 TYPE sy-datum,
+         d50 TYPE sy-datum,
+         d51 TYPE sy-datum,
+         d52 TYPE sy-datum,
+         d53 TYPE sy-datum,
+         d54 TYPE sy-datum,
+         d55 TYPE sy-datum,
+         d56 TYPE sy-datum,
+         d57 TYPE sy-datum,
+         d58 TYPE sy-datum,
+         d59 TYPE sy-datum,
+         d60 TYPE sy-datum,
+       END OF gs_datum,
+       gt_hrranges TYPE STANDARD TABLE OF hrranges WITH HEADER LINE,
+       gv_start    TYPE sy-datum,
+       gv_exe,
+       gs_header   TYPE bapisitemr,
+       gt_schedule TYPE STANDARD TABLE OF bapisshdin  WITH HEADER LINE,
+       gt_ret      TYPE STANDARD TABLE OF bapireturn1 WITH HEADER LINE,
+       gv_tabix    TYPE sy-tabix,
+       gv_error    TYPE c,
+       gt_fieldcat TYPE slis_t_fieldcat_alv WITH HEADER LINE.
+
+*Begin of Ins 10.01.2022 17:04:41 S.P.
+DATA: BEGIN OF gt_file_ck OCCURS 0,
+        matnr(18),
+        meins(3),
+        q1        TYPE string,
+        q2        TYPE string,
+        q3        TYPE string,
+        q4        TYPE string,
+        q5        TYPE string,
+        q6        TYPE string,
+        q7        TYPE string,
+        q8        TYPE string,
+        q9        TYPE string,
+        q10       TYPE string,
+        q11       TYPE string,
+        q12       TYPE string,
+        q13       TYPE string,
+        q14       TYPE string,
+        q15       TYPE string,
+        q16       TYPE string,
+        q17       TYPE string,
+        q18       TYPE string,
+        q19       TYPE string,
+        q20       TYPE string,
+        q21       TYPE string,
+        q22       TYPE string,
+        q23       TYPE string,
+        q24       TYPE string,
+        q25       TYPE string,
+        q26       TYPE string,
+        q27       TYPE string,
+        q28       TYPE string,
+        q29       TYPE string,
+        q30       TYPE string,
+        q31       TYPE string,
+        q32       TYPE string,
+        q33       TYPE string,
+        q34       TYPE string,
+        q35       TYPE string,
+        q36       TYPE string,
+        q37       TYPE string,
+        q38       TYPE string,
+        q39       TYPE string,
+        q40       TYPE string,
+        q41       TYPE string,
+        q42       TYPE string,
+        q43       TYPE string,
+        q44       TYPE string,
+        q45       TYPE string,
+        q46       TYPE string,
+        q47       TYPE string,
+        q48       TYPE string,
+        q49       TYPE string,
+        q50       TYPE string,
+        q51       TYPE string,
+        q52       TYPE string,
+        q53       TYPE string,
+        q54       TYPE string,
+        q55       TYPE string,
+        q56       TYPE string,
+        q57       TYPE string,
+        q58       TYPE string,
+        q59       TYPE string,
+        q60       TYPE string,
+      END OF gt_file_ck.
+"boc by samim cr-4201
+TYPES: BEGIN OF lt_file_xlsx ,
+         incomfld TYPE char35,
+         meins    TYPE meins,
+         q1       TYPE string,
+         q2       TYPE string,
+         q3       TYPE string,
+         q4       TYPE string,
+         q5       TYPE string,
+         q6       TYPE string,
+         q7       TYPE string,
+         q8       TYPE string,
+         q9       TYPE string,
+         q10      TYPE string,
+         q11      TYPE string,
+         q12      TYPE string,
+         q13      TYPE string,
+         q14      TYPE string,
+         q15      TYPE string,
+         q16      TYPE string,
+         q17      TYPE string,
+         q18      TYPE string,
+         q19      TYPE string,
+         q20      TYPE string,
+         q21      TYPE string,
+         q22      TYPE string,
+         q23      TYPE string,
+         q24      TYPE string,
+         q25      TYPE string,
+         q26      TYPE string,
+         q27      TYPE string,
+         q28      TYPE string,
+         q29      TYPE string,
+         q30      TYPE string,
+         q31      TYPE string,
+         q32      TYPE string,
+         q33      TYPE string,
+         q34      TYPE string,
+         q35      TYPE string,
+         q36      TYPE string,
+         q37      TYPE string,
+         q38      TYPE string,
+         q39      TYPE string,
+         q40      TYPE string,
+         q41      TYPE string,
+         q42      TYPE string,
+         q43      TYPE string,
+         q44      TYPE string,
+         q45      TYPE string,
+         q46      TYPE string,
+         q47      TYPE string,
+         q48      TYPE string,
+         q49      TYPE string,
+         q50      TYPE string,
+         q51      TYPE string,
+         q52      TYPE string,
+         q53      TYPE string,
+         q54      TYPE string,
+         q55      TYPE string,
+         q56      TYPE string,
+         q57      TYPE string,
+         q58      TYPE string,
+         q59      TYPE string,
+         q60      TYPE string,
+       END OF lt_file_xlsx.
+DATA: gt_file_delete     LIKE gt_file OCCURS 0 WITH HEADER LINE,
+      gt_file_create     LIKE gt_file OCCURS 0 WITH HEADER LINE,
+      gt_file_update     LIKE gt_file OCCURS 0 WITH HEADER LINE,
+      lv_ext             TYPE string,
+      gt_file_xlsx       TYPE STANDARD TABLE OF  lt_file_xlsx WITH EMPTY KEY,
+      lv_index           TYPE sy-tabix,
+      gs_alv             LIKE gt_file_ck,
+      lv_prev_kdmat      TYPE knmt-kdmat,
+      lv_prev_matnr      TYPE knmt-matnr,
+      lr_matnr           TYPE RANGE OF matnr,
+      lv_requirement     TYPE bapisitemr-requ_type,
+      lt_requirement_out TYPE TABLE OF bapisitmeo,
+      lt_return          TYPE TABLE OF bapireturn1,
+      ls_return          TYPE  bapireturn1,
+
+      lv_activ           TYPE bapisitemr-vers_activ,
+      lt_schedule_in     TYPE TABLE OF bapisshdin,
+      ls_schedule_in     TYPE bapisshdin,
+      lv_requirement1    TYPE bapisitemr-requ_type,
+      lv_requirement2    TYPE bapisitemr-req_number,
+      lv_qname           TYPE string,
+      lv_txt             TYPE string,
+      lv_filelength      TYPE i,
+      lt_records         TYPE solix_tab,
+      lv_xstring         TYPE xstring,
+      lo_excel_ref       TYPE REF TO cl_fdt_xl_spreadsheet,
+      lt_sheets          TYPE if_fdt_doc_spreadsheet=>t_worksheet_names,
+      lv_sheet           TYPE string,
+      lt_error           TYPE STANDARD TABLE OF string,
+      ls_error           TYPE string,
+      lv_tabix           TYPE sy-tabix.
+DATA(lv_error) = abap_false.
+DATA(lv_start)  = |{ p_start+6(2) }.{ p_start+4(2) }.{ p_start(4) }|.
+DATA(lv_end)  = |{ p_end+6(2) }.{ p_end+4(2) }.{ p_end(4) }|.
+FIELD-SYMBOLS: <gt_data> TYPE STANDARD TABLE,
+               <ls_row>  TYPE any,
+               <fs_src>  TYPE any,
+               <fs_dst>  TYPE any.
+CONSTANTS  : lc_update TYPE char1 VALUE 'S',
+             lc_mode   TYPE char1 VALUE 'E',
+             lc_x      TYPE char1 VALUE 'X',
+             lc_csv    TYPE string VALUE '.CSV',
+             lc_csv2   TYPE string VALUE '.csv',
+             lc_xlsx   TYPE string VALUE 'XLSX',
+             lc_xlsx2  TYPE string VALUE 'xlsx',
+             lc_sign   TYPE sign VALUE 'I',
+             lc_option TYPE option VALUE 'EQ'.
+CONSTANTS:
+  gc_mon_01 TYPE n LENGTH 2 VALUE '01',
+  gc_mon_02 TYPE n LENGTH 2 VALUE '02',
+  gc_mon_03 TYPE n LENGTH 2 VALUE '03',
+  gc_mon_04 TYPE n LENGTH 2 VALUE '04',
+  gc_mon_05 TYPE n LENGTH 2 VALUE '05',
+  gc_mon_06 TYPE n LENGTH 2 VALUE '06',
+  gc_mon_07 TYPE n LENGTH 2 VALUE '07',
+  gc_mon_08 TYPE n LENGTH 2 VALUE '08',
+  gc_mon_09 TYPE n LENGTH 2 VALUE '09',
+  gc_mon_10 TYPE n LENGTH 2 VALUE '10',
+  gc_mon_11 TYPE n LENGTH 2 VALUE '11',
+  gc_mon_12 TYPE n LENGTH 2 VALUE '12'.
+
+DATA : gs_cm60r TYPE cm60r,
+       gs_cm60a TYPE cm60a,
+       gt_pbpt  TYPE TABLE OF pbpt,
+       gt_pbmsg TYPE TABLE OF pbmsg,
+       gs_pbpt  TYPE pbpt.
+CONSTANTS : lc_v TYPE char1 VALUE 'V',
+            lc_d TYPE char1 VALUE 'D'.
+
+"eoc by samim cr-4201
+*End of Ins 10.01.2022 17:04:41 S.P.
+
+***--- Initialization ---***********************************************
+INITIALIZATION.
+*  manual = 'USER MANUAL'.
+*  REFRESH gt_hrranges.
+*  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+*    EXPORTING
+*      i_progname      = 'ZPL_LOADING_FORECAST'
+*      i_name          = 'ZPL_LOADING_FORECAST_PATH'
+*      i_type          = 'P'
+*      i_numb          = '0001'
+*    TABLES
+*      it_hrranges     = gt_hrranges[]
+*    EXCEPTIONS
+*      wrong_type      = 1
+*      wrong_value     = 2
+*      inchoerent_type = 3
+*      OTHERS          = 4.
+*  READ TABLE gt_hrranges INDEX 1.
+*  file_path = gt_hrranges-low.
+*  REFRESH gt_hrranges.
+*  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+*    EXPORTING
+*      i_progname      = 'ZPL_LOADING_FORECAST'
+*      i_name          = 'ZPL_LOADING_FORECAST_NAME'
+*      i_type          = 'P'
+*      i_numb          = '0001'
+*    TABLES
+*      it_hrranges     = gt_hrranges[]
+*    EXCEPTIONS
+*      wrong_type      = 1
+*      wrong_value     = 2
+*      inchoerent_type = 3
+*      OTHERS          = 4.
+*  READ TABLE gt_hrranges INDEX 1.
+*  file_name = gt_hrranges-low.
+*  file_path = 'G:\CLIC\Clic_realization\06_Change Management\TRAINING\US Work Instructions\Manufacturing'.
+*  file_name = '"Clic_SAP Work Instruction_Forecast Upload.pdf"'.
+  LOOP AT SCREEN.
+    IF screen-name = 'P_TYPEC' OR screen-name = 'P_CHOOS'.
+      screen-input = 0.
+      screen-display_3d = 0.
+      MODIFY SCREEN.
+    ENDIF.
+    IF screen-name = 'RB_ACT' OR screen-name = 'RB_SIM'.
+      screen-input = 0.
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.
+
+***--- At Selection Screen ---******************************************
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
+  CALL FUNCTION 'WS_FILENAME_GET'
+    EXPORTING
+      mask     = ',*.*.'
+      mode     = 'O'
+    IMPORTING
+      filename = p_file
+    EXCEPTIONS
+      OTHERS   = 1.
+
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_type.
+  PERFORM f4_type.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_versb.
+  PERFORM f4_versb.
+
+AT SELECTION-SCREEN.
+  PERFORM check_input.
+
+AT SELECTION-SCREEN OUTPUT.
+  LOOP AT SCREEN.
+    IF screen-name = 'P_TYPEC' OR screen-name = 'P_CHOOS'.
+      screen-input = 0.
+      screen-display_3d = 0.
+      MODIFY SCREEN.
+    ENDIF.
+    IF screen-name = 'RB_ACT' OR screen-name = 'RB_SIM'.
+      screen-input = 0.
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.
+  PERFORM check_output.
+
+***--- Start of Selection ---*******************************************
+START-OF-SELECTION.
+  IF p_versb = '00'.
+    rb_act = 'X'.
+    CLEAR rb_sim.
+  ELSE.
+    CLEAR rb_act.
+    rb_sim = 'X'.
+  ENDIF.
+
+  CLEAR: gv_error.
+  IF lv_ext = lc_csv  OR lv_ext = lc_csv2. "added by samim cr-4201
+    PERFORM read_file.
+    "boc by samim cr-4201
+  ENDIF.
+  IF lv_ext = lc_xlsx OR lv_ext = lc_xlsx2.
+    PERFORM read_file_xlsx.
+  ENDIF.
+  "eoc by samim cr-4201
+  CHECK gv_error IS INITIAL.
+  PERFORM dates_calc.
+  PERFORM md62_delete."added by samim
+  PERFORM create_orders.
+  SORT gt_alv.
+  PERFORM call_alv.
+
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_OUTPUT
+*&---------------------------------------------------------------------*
+FORM check_output.
+
+  IF p_versb = '00'.
+    rb_act = 'X'.
+    CLEAR rb_sim.
+  ELSE.
+    CLEAR rb_act.
+    rb_sim = 'X'.
+  ENDIF.
+  CASE p_type.
+    WHEN 'M'.
+      p_typec = text-mon.
+    WHEN 'W'.
+      p_typec = text-wee.
+    WHEN 'D'.
+      p_typec = text-day.
+    WHEN OTHERS.
+      CLEAR p_typec.
+  ENDCASE.
+  CASE p_choose.
+    WHEN '1'.
+      p_choos = text-sta.
+    WHEN '2'.
+      p_choos = text-end.
+    WHEN OTHERS.
+      CLEAR p_choos.
+  ENDCASE.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_INPUT
+*&---------------------------------------------------------------------*
+FORM check_input.
+
+  DATA: lv_len        TYPE i,
+*        lv_ext(4),  "commented by samim cr-4201
+
+        lv_year1(4)   TYPE n,
+        lv_year2(4)   TYPE n,
+        lv_cmonth1(2) TYPE n,
+        lv_cmonth2(2) TYPE n,
+        lv_month1     TYPE kmonth,
+        lv_month2     TYPE kmonth,
+        lv_week1      TYPE kweek,
+        lv_week2      TYPE kweek,
+        lv_monday1    TYPE sy-datum,
+        lv_monday2    TYPE sy-datum,
+        lv_sunday1    TYPE sy-datum,
+        lv_sunday2    TYPE sy-datum.
+
+  IF p_file IS INITIAL.
+    MESSAGE e257 WITH text-e01.
+  ENDIF.
+*  IF lv_len GT 4. "commented by samim cr-4201
+  lv_len = strlen( p_file ) - 4.
+  lv_ext = p_file+lv_len(4).
+
+  IF lv_ext <> '.CSV' AND lv_ext <> '.csv'
+   AND lv_ext <> lc_xlsx AND lv_ext <> lc_xlsx2. "added by samim cr-4201
+*      MESSAGE e261. "commented by samim cr-4201
+    MESSAGE e516.
+  ENDIF.
+*  ENDIF. "commented by samim cr-4201
+  IF p_start IS INITIAL.
+    MESSAGE e257 WITH text-e02.
+  ENDIF.
+  IF p_end IS INITIAL.
+    MESSAGE e257 WITH text-e03.
+  ENDIF.
+  IF p_end < p_start.
+    MESSAGE e258.
+  ENDIF.
+  IF p_werks IS INITIAL.
+    MESSAGE e257 WITH text-e04.
+  ENDIF.
+  CASE p_type.
+    WHEN 'M'.
+      lv_month1  = p_start(6).
+      gv_start(6) = lv_month1.
+      gv_start+6(2) = '01'.
+      lv_month2  = p_end(6).
+      lv_year1   = lv_month1(4).
+      lv_year2   = lv_month2(4).
+      lv_cmonth1 = lv_month1+4(2).
+      lv_cmonth2 = lv_month2+4(2).
+      gv_buckets = ( ( lv_year2 - lv_year1 ) * 12 ) + lv_cmonth2 - lv_cmonth1 + 1.
+      IF gv_buckets > 60.
+        MESSAGE e259.
+      ENDIF.
+    WHEN 'W'.
+      CALL FUNCTION 'GET_WEEK_INFO_BASED_ON_DATE'
+        EXPORTING
+          date   = p_start
+        IMPORTING
+          week   = lv_week1
+          monday = lv_monday1
+          sunday = lv_sunday1.
+      gv_start = lv_monday1.
+      CALL FUNCTION 'GET_WEEK_INFO_BASED_ON_DATE'
+        EXPORTING
+          date   = p_end
+        IMPORTING
+          week   = lv_week2
+          monday = lv_monday2
+          sunday = lv_sunday2.
+      gv_buckets = ( ( lv_monday2 - lv_monday1 ) DIV 7 ) + 1.
+      IF gv_buckets > 60.
+        MESSAGE e259.
+      ENDIF.
+    WHEN 'D'.
+      gv_start = p_start.
+      gv_buckets = p_end - p_start + 1.
+      IF gv_buckets > 60.
+        MESSAGE e259.
+      ENDIF.
+    WHEN OTHERS.
+      MESSAGE e256.
+  ENDCASE.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  READ_FILE
+*&---------------------------------------------------------------------*
+FORM read_file.
+
+  DATA: lv_file TYPE string,
+        BEGIN OF lt_input OCCURS 0,
+          str TYPE string,
+        END OF lt_input.
+
+  lv_file = p_file.
+  CALL FUNCTION 'GUI_UPLOAD'
+    EXPORTING
+      filename                = lv_file
+    TABLES
+      data_tab                = lt_input[]
+    EXCEPTIONS
+      file_open_error         = 1
+      file_read_error         = 2
+      no_batch                = 3
+      gui_refuse_filetransfer = 4
+      invalid_type            = 5
+      no_authority            = 6
+      unknown_error           = 7
+      bad_data_format         = 8
+      header_not_allowed      = 9
+      separator_not_allowed   = 10
+      header_too_long         = 11
+      unknown_dp_error        = 12
+      access_denied           = 13
+      dp_out_of_memory        = 14
+      disk_full               = 15
+      dp_timeout              = 16
+      OTHERS                  = 17.
+  IF sy-subrc <> 0.
+    gv_error = abap_true.
+    MESSAGE i260.
+    EXIT.
+  ENDIF.
+
+  LOOP AT lt_input.
+    IF sy-tabix = 1.
+      CONTINUE.
+    ENDIF.
+    SPLIT lt_input-str AT ';' INTO gt_file-matnr gt_file-meins
+                                   gt_file-q1 gt_file-q2 gt_file-q3
+                                   gt_file-q4 gt_file-q5 gt_file-q6
+                                   gt_file-q7 gt_file-q8 gt_file-q9
+                                   gt_file-q10 gt_file-q11 gt_file-q12
+                                   gt_file-q13 gt_file-q14 gt_file-q15
+                                   gt_file-q16 gt_file-q17 gt_file-q18
+                                   gt_file-q19 gt_file-q20 gt_file-q21
+                                   gt_file-q22 gt_file-q23 gt_file-q24
+                                   gt_file-q25 gt_file-q26 gt_file-q27
+                                   gt_file-q28 gt_file-q29 gt_file-q30
+                                   gt_file-q31 gt_file-q32 gt_file-q33
+                                   gt_file-q34 gt_file-q35 gt_file-q36
+                                   gt_file-q37 gt_file-q38 gt_file-q39
+                                   gt_file-q40 gt_file-q41 gt_file-q42
+                                   gt_file-q43 gt_file-q44 gt_file-q45
+                                   gt_file-q46 gt_file-q47 gt_file-q48
+                                   gt_file-q49 gt_file-q50 gt_file-q51
+                                   gt_file-q52 gt_file-q53 gt_file-q54
+                                   gt_file-q55 gt_file-q56 gt_file-q57
+                                   gt_file-q58 gt_file-q59 gt_file-q60.
+    CALL FUNCTION 'CONVERSION_EXIT_MATN1_INPUT'
+      EXPORTING
+        input        = gt_file-matnr
+      IMPORTING
+        output       = gt_file-matnr
+      EXCEPTIONS
+        length_error = 1
+        OTHERS       = 2.
+    IF gv_buckets < 60.
+      CLEAR gt_file-q60.
+    ENDIF.
+    IF gv_buckets < 59.
+      CLEAR gt_file-q59.
+    ENDIF.
+    IF gv_buckets < 58.
+      CLEAR gt_file-q58.
+    ENDIF.
+    IF gv_buckets < 57.
+      CLEAR gt_file-q57.
+    ENDIF.
+    IF gv_buckets < 56.
+      CLEAR gt_file-q56.
+    ENDIF.
+    IF gv_buckets < 55.
+      CLEAR gt_file-q55.
+    ENDIF.
+    IF gv_buckets < 54.
+      CLEAR gt_file-q54.
+    ENDIF.
+    IF gv_buckets < 53.
+      CLEAR gt_file-q53.
+    ENDIF.
+    IF gv_buckets < 52.
+      CLEAR gt_file-q52.
+    ENDIF.
+    IF gv_buckets < 51.
+      CLEAR gt_file-q51.
+    ENDIF.
+    IF gv_buckets < 50.
+      CLEAR gt_file-q50.
+    ENDIF.
+    IF gv_buckets < 49.
+      CLEAR gt_file-q49.
+    ENDIF.
+    IF gv_buckets < 48.
+      CLEAR gt_file-q48.
+    ENDIF.
+    IF gv_buckets < 47.
+      CLEAR gt_file-q47.
+    ENDIF.
+    IF gv_buckets < 46.
+      CLEAR gt_file-q46.
+    ENDIF.
+    IF gv_buckets < 45.
+      CLEAR gt_file-q45.
+    ENDIF.
+    IF gv_buckets < 44.
+      CLEAR gt_file-q44.
+    ENDIF.
+    IF gv_buckets < 43.
+      CLEAR gt_file-q43.
+    ENDIF.
+    IF gv_buckets < 42.
+      CLEAR gt_file-q42.
+    ENDIF.
+    IF gv_buckets < 41.
+      CLEAR gt_file-q41.
+    ENDIF.
+    IF gv_buckets < 40.
+      CLEAR gt_file-q40.
+    ENDIF.
+    IF gv_buckets < 39.
+      CLEAR gt_file-q39.
+    ENDIF.
+    IF gv_buckets < 38.
+      CLEAR gt_file-q38.
+    ENDIF.
+    IF gv_buckets < 37.
+      CLEAR gt_file-q37.
+    ENDIF.
+    IF gv_buckets < 36.
+      CLEAR gt_file-q36.
+    ENDIF.
+    IF gv_buckets < 35.
+      CLEAR gt_file-q35.
+    ENDIF.
+    IF gv_buckets < 34.
+      CLEAR gt_file-q34.
+    ENDIF.
+    IF gv_buckets < 33.
+      CLEAR gt_file-q33.
+    ENDIF.
+    IF gv_buckets < 32.
+      CLEAR gt_file-q32.
+    ENDIF.
+    IF gv_buckets < 31.
+      CLEAR gt_file-q31.
+    ENDIF.
+    IF gv_buckets < 30.
+      CLEAR gt_file-q30.
+    ENDIF.
+    IF gv_buckets < 29.
+      CLEAR gt_file-q29.
+    ENDIF.
+    IF gv_buckets < 28.
+      CLEAR gt_file-q28.
+    ENDIF.
+    IF gv_buckets < 27.
+      CLEAR gt_file-q27.
+    ENDIF.
+    IF gv_buckets < 26.
+      CLEAR gt_file-q26.
+    ENDIF.
+    IF gv_buckets < 25.
+      CLEAR gt_file-q25.
+    ENDIF.
+    IF gv_buckets < 24.
+      CLEAR gt_file-q24.
+    ENDIF.
+    IF gv_buckets < 23.
+      CLEAR gt_file-q23.
+    ENDIF.
+    IF gv_buckets < 22.
+      CLEAR gt_file-q22.
+    ENDIF.
+    IF gv_buckets < 21.
+      CLEAR gt_file-q21.
+    ENDIF.
+    IF gv_buckets < 20.
+      CLEAR gt_file-q20.
+    ENDIF.
+    IF gv_buckets < 19.
+      CLEAR gt_file-q19.
+    ENDIF.
+    IF gv_buckets < 18.
+      CLEAR gt_file-q18.
+    ENDIF.
+    IF gv_buckets < 17.
+      CLEAR gt_file-q17.
+    ENDIF.
+    IF gv_buckets < 16.
+      CLEAR gt_file-q16.
+    ENDIF.
+    IF gv_buckets < 15.
+      CLEAR gt_file-q15.
+    ENDIF.
+    IF gv_buckets < 14.
+      CLEAR gt_file-q14.
+    ENDIF.
+    IF gv_buckets < 13.
+      CLEAR gt_file-q13.
+    ENDIF.
+    IF gv_buckets < 12.
+      CLEAR gt_file-q12.
+    ENDIF.
+    IF gv_buckets < 11.
+      CLEAR gt_file-q11.
+    ENDIF.
+    IF gv_buckets < 10.
+      CLEAR gt_file-q10.
+    ENDIF.
+    IF gv_buckets < 9.
+      CLEAR gt_file-q9.
+    ENDIF.
+    IF gv_buckets < 8.
+      CLEAR gt_file-q8.
+    ENDIF.
+    IF gv_buckets < 7.
+      CLEAR gt_file-q7.
+    ENDIF.
+    IF gv_buckets < 6.
+      CLEAR gt_file-q6.
+    ENDIF.
+    IF gv_buckets < 5.
+      CLEAR gt_file-q5.
+    ENDIF.
+    IF gv_buckets < 4.
+      CLEAR gt_file-q4.
+    ENDIF.
+    IF gv_buckets < 3.
+      CLEAR gt_file-q3.
+    ENDIF.
+    IF gv_buckets < 2.
+      CLEAR gt_file-q2.
+    ENDIF.
+    APPEND gt_file.
+  ENDLOOP.
+
+  SORT gt_file.
+
+*Begin of Ins 16.12.2021 11:10:33 S.P.
+  REFRESH: gt_file_ck.
+  LOOP AT lt_input.
+    IF sy-tabix = 1.
+      CONTINUE.
+    ENDIF.
+    SPLIT lt_input-str AT ';' INTO gt_file_ck-matnr gt_file_ck-meins
+                                   gt_file_ck-q1 gt_file_ck-q2 gt_file_ck-q3
+                                   gt_file_ck-q4 gt_file_ck-q5 gt_file_ck-q6
+                                   gt_file_ck-q7 gt_file_ck-q8 gt_file_ck-q9
+                                   gt_file_ck-q10 gt_file_ck-q11 gt_file_ck-q12
+                                   gt_file_ck-q13 gt_file_ck-q14 gt_file_ck-q15
+                                   gt_file_ck-q16 gt_file_ck-q17 gt_file_ck-q18
+                                   gt_file_ck-q19 gt_file_ck-q20 gt_file_ck-q21
+                                   gt_file_ck-q22 gt_file_ck-q23 gt_file_ck-q24
+                                   gt_file_ck-q25 gt_file_ck-q26 gt_file_ck-q27
+                                   gt_file_ck-q28 gt_file_ck-q29 gt_file_ck-q30
+                                   gt_file_ck-q31 gt_file_ck-q32 gt_file_ck-q33
+                                   gt_file_ck-q34 gt_file_ck-q35 gt_file_ck-q36
+                                   gt_file_ck-q37 gt_file_ck-q38 gt_file_ck-q39
+                                   gt_file_ck-q40 gt_file_ck-q41 gt_file_ck-q42
+                                   gt_file_ck-q43 gt_file_ck-q44 gt_file_ck-q45
+                                   gt_file_ck-q46 gt_file_ck-q47 gt_file_ck-q48
+                                   gt_file_ck-q49 gt_file_ck-q50 gt_file_ck-q51
+                                   gt_file_ck-q52 gt_file_ck-q53 gt_file_ck-q54
+                                   gt_file_ck-q55 gt_file_ck-q56 gt_file_ck-q57
+                                   gt_file_ck-q58 gt_file_ck-q59 gt_file_ck-q60.
+    APPEND gt_file_ck.
+  ENDLOOP.
+
+  LOOP AT gt_file_ck.
+    PERFORM f_check_qty.
+    IF gv_error IS NOT INITIAL.
+      MESSAGE i423.
+      EXIT.
+    ENDIF.
+  ENDLOOP.
+*End of Ins 16.12.2021 11:10:33 S.P.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  DATES_CALC
+*&---------------------------------------------------------------------*
+FORM dates_calc.
+
+  DATA: lv_datum     TYPE sy-datum,
+        lv_field(20),
+        lv_count     TYPE i,
+        lv_fabkl     TYPE t001w-fabkl.
+
+  FIELD-SYMBOLS: <field> TYPE any.
+
+  IF p_choose = '2'.
+    SELECT SINGLE fabkl
+            FROM  t001w INTO lv_fabkl
+            WHERE werks = p_werks.
+  ENDIF.
+
+  lv_count = 1.
+  lv_datum = gv_start.
+  DO gv_buckets TIMES.
+    lv_field = lv_count.
+    SHIFT lv_field LEFT DELETING LEADING space.
+    CONCATENATE 'GS_DATUM-D' lv_field INTO lv_field.
+    ASSIGN (lv_field) TO <field>.
+    CASE p_type.
+      WHEN 'M'.
+        CASE p_choose.
+          WHEN '1'.
+            <field> = lv_datum.
+            lv_datum = lv_datum + 31.
+            lv_datum+6(2) = '01'.
+          WHEN '2'.
+            CALL FUNCTION 'FKK_LAST_DAY_OF_MONTH'
+              EXPORTING
+                day_in            = lv_datum
+              IMPORTING
+                last_day_of_month = <field>
+              EXCEPTIONS
+                day_in_no_date    = 1
+                OTHERS            = 2.
+            lv_datum = <field> + 1.
+            CALL FUNCTION 'BKK_GET_PRIOR_WORKDAY'
+              EXPORTING
+                i_date         = <field>
+                i_calendar1    = lv_fabkl
+              IMPORTING
+                e_workday      = <field>
+              EXCEPTIONS
+                calendar_error = 1
+                OTHERS         = 2.
+        ENDCASE.
+      WHEN 'W'.
+        CASE p_choose.
+          WHEN '1'.
+            <field> = lv_datum.
+          WHEN '2'.
+            CALL FUNCTION 'GET_WEEK_INFO_BASED_ON_DATE'
+              EXPORTING
+                date   = lv_datum
+              IMPORTING
+                sunday = <field>.
+            CALL FUNCTION 'BKK_GET_PRIOR_WORKDAY'
+              EXPORTING
+                i_date         = <field>
+                i_calendar1    = lv_fabkl
+              IMPORTING
+                e_workday      = <field>
+              EXCEPTIONS
+                calendar_error = 1
+                OTHERS         = 2.
+        ENDCASE.
+        lv_datum = lv_datum + 7.
+      WHEN 'D'.
+        <field> = lv_datum.
+        lv_datum = lv_datum + 1.
+    ENDCASE.
+    lv_count = lv_count + 1.
+  ENDDO.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  CREATE_ORDERS
+*&---------------------------------------------------------------------*
+FORM create_orders.
+
+  DATA: lv_message(220),
+        lv_meins        TYPE mara-meins,
+        lv_menge        TYPE bstmg,
+        lv_index        TYPE sy-index,
+        lv_commit,
+        lt_hrranges     TYPE STANDARD TABLE OF hrranges.
+
+  FIELD-SYMBOLS: <date> TYPE any,
+                 <qty>  TYPE any.
+
+  REFRESH gt_alv.
+  "boc by samim cr-4201
+  CLEAR : gt_file[].
+  gt_file[] = gt_file_create[].
+  "eoc by samim cr-4201
+  LOOP AT gt_file.
+    AT NEW matnr.
+      CLEAR: gt_schedule, gt_ret, gs_header, gt_alv.
+      REFRESH: gt_schedule, gt_ret.
+
+      CALL FUNCTION 'CONVERSION_EXIT_MATN1_INPUT'
+        EXPORTING
+          input        = gt_file-matnr
+        IMPORTING
+          output       = gs_header-material
+        EXCEPTIONS
+          length_error = 1
+          OTHERS       = 2.
+
+      gs_header-plant      = p_werks.
+      gs_header-req_number = p_pbdnr.
+      gs_header-version    = p_versb.
+      gs_header-vers_activ = rb_act.
+    ENDAT.
+
+    MOVE-CORRESPONDING gt_file TO gt_alv.
+
+    CLEAR gt_schedule.
+    gt_schedule-date_type = 3.
+
+    CALL FUNCTION 'CONVERSION_EXIT_CUNIT_INPUT'
+      EXPORTING
+        input          = gt_file-meins
+      IMPORTING
+        output         = lv_meins
+      EXCEPTIONS
+        unit_not_found = 1
+        OTHERS         = 2.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+              WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_message.
+      PERFORM error USING lv_message.
+      CONTINUE.
+    ENDIF.
+
+    SELECT SINGLE meins
+            FROM  mara INTO gt_schedule-unit
+            WHERE matnr = gs_header-material.
+
+    IF gt_schedule-unit <> lv_meins.
+      lv_menge = 1.
+      CALL FUNCTION 'MD_CONVERT_MATERIAL_UNIT'
+        EXPORTING
+          i_matnr              = gs_header-material
+          i_in_me              = lv_meins
+          i_out_me             = gt_schedule-unit
+          i_menge              = lv_menge
+        IMPORTING
+          e_menge              = lv_menge
+        EXCEPTIONS
+          error_in_application = 1
+          error                = 2
+          OTHERS               = 3.
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_message.
+        PERFORM error USING lv_message.
+        CONTINUE.
+      ENDIF.
+    ENDIF.
+
+*SedaAMS_PT_3823_4018_Upload PIR's
+    SELECT SINGLE mstae
+      FROM mara
+      INTO @DATA(lv_mstae)
+      WHERE matnr EQ @gs_header-material.
+
+    SELECT SINGLE mmsta
+      FROM marc
+      INTO @DATA(lv_mmsta)
+      WHERE matnr EQ @gs_header-material
+        AND werks EQ @p_werks.
+
+    CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+      EXPORTING
+        i_progname      = sy-repid
+        i_name          = 'S_MSTAE'
+        i_type          = 'S'
+      TABLES
+        it_hrranges     = lt_hrranges
+      EXCEPTIONS
+        wrong_type      = 1
+        wrong_value     = 2
+        inchoerent_type = 3
+        OTHERS          = 4.
+    IF sy-subrc = 0.
+
+      READ TABLE lt_hrranges TRANSPORTING NO FIELDS WITH KEY low = lv_mstae.
+      IF sy-subrc = 0.
+        CLEAR lv_message.
+        MESSAGE e506 INTO lv_message WITH lv_mstae.
+        PERFORM error USING lv_message.
+        CONTINUE.
+      ENDIF.
+
+      READ TABLE lt_hrranges TRANSPORTING NO FIELDS WITH KEY low = lv_mmsta.
+      IF sy-subrc = 0.
+        CLEAR lv_message.
+        MESSAGE e506 INTO lv_message WITH lv_mmsta.
+        PERFORM error USING lv_message.
+        CONTINUE.
+      ENDIF.
+    ENDIF.
+*SedaAMS_PT_3823_4018_Upload PIR's
+
+    gt_alv-sem = icon_green_light.
+    IF cb_test IS INITIAL AND gv_exe = 'X'.
+      MESSAGE s281 INTO gt_alv-mess.
+    ELSE.
+      MESSAGE s282 INTO gt_alv-mess.
+    ENDIF.
+    APPEND gt_alv.
+
+    DO gv_buckets TIMES.
+      lv_index = sy-index.
+      ASSIGN COMPONENT lv_index OF STRUCTURE gs_datum TO <date>.
+      gt_schedule-req_date = <date>.
+      lv_index = lv_index + 2.
+      ASSIGN COMPONENT lv_index OF STRUCTURE gt_file TO <qty>.
+      lv_menge = <qty>.
+      IF gt_schedule-unit <> lv_meins.
+        CALL FUNCTION 'MD_CONVERT_MATERIAL_UNIT'
+          EXPORTING
+            i_matnr              = gs_header-material
+            i_in_me              = lv_meins
+            i_out_me             = gt_schedule-unit
+            i_menge              = lv_menge
+          IMPORTING
+            e_menge              = lv_menge
+          EXCEPTIONS
+            error_in_application = 1
+            error                = 2
+            OTHERS               = 3.
+      ENDIF.
+      gt_schedule-req_qty = lv_menge.
+      APPEND gt_schedule.
+    ENDDO.
+
+    AT END OF matnr.
+      IF cb_test IS INITIAL AND gv_exe = 'X'.
+        lv_commit = 'X'.
+      ELSE.
+        CLEAR lv_commit.
+      ENDIF.
+
+      CALL FUNCTION 'BAPI_REQUIREMENTS_CREATE'
+        EXPORTING
+          requirements_item        = gs_header
+          do_commit                = lv_commit
+        TABLES
+          requirements_schedule_in = gt_schedule[]
+          return                   = gt_ret[].
+      LOOP AT gt_ret WHERE type CA 'EA'.
+      ENDLOOP.
+      IF sy-subrc = 0.
+        LOOP AT gt_alv WHERE matnr = gs_header-material
+                       AND   sem   = icon_green_light.
+          lv_index = sy-tabix.
+          gt_alv-sem = icon_red_light.
+          gt_alv-mess = gt_ret-message.
+          MODIFY gt_alv INDEX lv_index.
+        ENDLOOP.
+      ENDIF.
+      IF lv_commit IS INITIAL.
+        CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+      ENDIF.
+    ENDAT.
+
+  ENDLOOP.
+  " boc by samim cr-4201
+  IF gt_file_update[] IS NOT INITIAL.
+
+    LOOP AT gt_file_update INTO DATA(ls_file).
+      CLEAR: lv_requirement,lt_requirement_out,lt_return,lv_activ,
+             lt_schedule_in,lv_requirement1,lv_requirement2.
+      CALL FUNCTION 'BAPI_REQUIREMENTS_GETDETAIL'
+        EXPORTING
+          material         = ls_file-matnr
+          plant            = p_werks
+          requirementstype = lv_requirement
+          version          = p_versb
+          reqmtsplannumber = p_pbdnr
+        TABLES
+          requirements_out = lt_requirement_out
+          return           = lt_return.
+
+      CLEAR : ls_schedule_in.
+      IF lt_requirement_out IS NOT INITIAL.
+        DATA(ls_req) = VALUE #( lt_requirement_out[ 1 ] OPTIONAL ).
+      ENDIF.
+      DATA(lv_date_type) = ls_req-date_type.
+      DATA(lv_unit) = ls_req-unit.
+      DATA(lv_prod_ves) = ls_req-bomexpl.
+      DATA(lv_bomexpl) = ls_req-bomexpl.
+      IF ls_file-q1 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_01 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q1.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q2 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_02 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q2.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q3 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_03 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q3.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q4 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_04 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q4.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q5 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_05 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q5.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q6 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_06 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q6.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+
+
+      IF ls_file-q7 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_07 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q7.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q8 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_08 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q8.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q9 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_09 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q9.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q10 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_10 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q10.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q11 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_11 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q11.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file-q12 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_12 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file-q12.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      CLEAR: lt_return.
+      CALL FUNCTION 'BAPI_REQUIREMENTS_CHANGE'
+        EXPORTING
+          material                 = ls_file-matnr
+          plant                    = p_werks
+          requirementstype         = lv_requirement1
+          version                  = p_versb
+          reqmtsplannumber         = lv_requirement2
+          vers_activ               = lc_x
+          do_commit                = space
+          update_mode              = lc_x
+          delete_old               = lc_x
+          no_withdr                = lc_x
+        TABLES
+          requirements_schedule_in = lt_schedule_in
+          return                   = lt_return.
+      CLEAR gt_alv.
+      MOVE-CORRESPONDING ls_file TO gt_alv.
+      gt_alv-sem = icon_green_light.
+      MESSAGE s282 INTO gt_alv-mess.
+      IF cb_test IS INITIAL AND gv_exe = lc_x.
+        READ TABLE lt_return INTO ls_return WITH KEY type = lc_mode .
+        IF sy-subrc <> 0 .
+          lv_commit = lc_x.
+          MESSAGE s281 INTO gt_alv-mess.
+        ENDIF.
+      ELSE.
+        CLEAR lv_commit.
+      ENDIF.
+      APPEND gt_alv.
+      IF lv_commit = abap_true.
+        CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+          EXPORTING
+            wait = lc_x.
+      ELSE.
+        CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+      ENDIF.
+    ENDLOOP.
+    CLEAR:ls_file.
+  ENDIF.
+  "  eoc by samim cr-4201
+
+
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  CREATE_ORDERS2
+*&---------------------------------------------------------------------*
+FORM create_orders2.
+
+  DATA: lv_message(220),
+        lv_meins        TYPE mara-meins,
+        lv_menge        TYPE bstmg,
+        lv_index        TYPE sy-index,
+        lv_commit,
+        ls_alv          LIKE gt_alv.
+
+  FIELD-SYMBOLS: <date> TYPE any,
+                 <qty>  TYPE any.
+  SORT: gt_file_update BY matnr.
+  LOOP AT gt_alv WHERE sem = icon_green_light.
+    gv_tabix = sy-tabix.
+    AT NEW matnr.
+      CLEAR: gt_schedule, gt_ret, gs_header.
+      REFRESH: gt_schedule, gt_ret.
+
+      CALL FUNCTION 'CONVERSION_EXIT_MATN1_INPUT'
+        EXPORTING
+          input        = gt_alv-matnr
+        IMPORTING
+          output       = gs_header-material
+        EXCEPTIONS
+          length_error = 1
+          OTHERS       = 2.
+
+      gs_header-plant      = p_werks.
+      gs_header-req_number = p_pbdnr.
+      gs_header-version    = p_versb.
+      gs_header-vers_activ = rb_act.
+    ENDAT.
+
+    CLEAR gt_schedule.
+    gt_schedule-date_type = 3.
+
+    CALL FUNCTION 'CONVERSION_EXIT_CUNIT_INPUT'
+      EXPORTING
+        input          = gt_alv-meins
+      IMPORTING
+        output         = lv_meins
+      EXCEPTIONS
+        unit_not_found = 1
+        OTHERS         = 2.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+              WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_message.
+      PERFORM error2 USING lv_message.
+      CONTINUE.
+    ENDIF.
+
+    SELECT SINGLE meins
+            FROM  mara INTO gt_schedule-unit
+            WHERE matnr = gs_header-material.
+
+    IF gt_schedule-unit <> lv_meins.
+      lv_menge = 1.
+      CALL FUNCTION 'MD_CONVERT_MATERIAL_UNIT'
+        EXPORTING
+          i_matnr              = gs_header-material
+          i_in_me              = lv_meins
+          i_out_me             = gt_schedule-unit
+          i_menge              = lv_menge
+        IMPORTING
+          e_menge              = lv_menge
+        EXCEPTIONS
+          error_in_application = 1
+          error                = 2
+          OTHERS               = 3.
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_message.
+        PERFORM error2 USING lv_message.
+        CONTINUE.
+      ENDIF.
+    ENDIF.
+
+    gt_alv-sem = icon_green_light.
+    IF cb_test IS INITIAL AND gv_exe = 'X'.
+      MESSAGE s281 INTO gt_alv-mess.
+    ELSE.
+      MESSAGE s282 INTO gt_alv-mess.
+    ENDIF.
+    MODIFY gt_alv INDEX gv_tabix.
+
+    DO gv_buckets TIMES.
+      lv_index = sy-index.
+      ASSIGN COMPONENT lv_index OF STRUCTURE gs_datum TO <date>.
+      gt_schedule-req_date = <date>.
+      lv_index = lv_index + 3.
+      ASSIGN COMPONENT lv_index OF STRUCTURE gt_alv TO <qty>.
+      lv_menge = <qty>.
+      IF gt_schedule-unit <> lv_meins.
+        CALL FUNCTION 'MD_CONVERT_MATERIAL_UNIT'
+          EXPORTING
+            i_matnr              = gs_header-material
+            i_in_me              = lv_meins
+            i_out_me             = gt_schedule-unit
+            i_menge              = lv_menge
+          IMPORTING
+            e_menge              = lv_menge
+          EXCEPTIONS
+            error_in_application = 1
+            error                = 2
+            OTHERS               = 3.
+      ENDIF.
+      gt_schedule-req_qty = lv_menge.
+      APPEND gt_schedule.
+    ENDDO.
+    "boc by samim cr-4201
+    READ TABLE gt_file_update INTO DATA(ls_file_upd)
+         WITH KEY matnr = gs_header-material BINARY SEARCH.
+    IF sy-subrc <> 0.
+      "eoc by samim cr-4201
+      AT END OF matnr.
+        IF cb_test IS INITIAL AND gv_exe = 'X'.
+          lv_commit = 'X'.
+        ELSE.
+          CLEAR lv_commit.
+        ENDIF.
+        CALL FUNCTION 'BAPI_REQUIREMENTS_CREATE'
+          EXPORTING
+            requirements_item        = gs_header
+            do_commit                = lv_commit
+          TABLES
+            requirements_schedule_in = gt_schedule[]
+            return                   = gt_ret[].
+        LOOP AT gt_ret WHERE type CA 'EA'.
+        ENDLOOP.
+
+        IF sy-subrc = 0.
+          LOOP AT gt_alv INTO ls_alv WHERE matnr = gs_header-material
+                                     AND   sem   = icon_green_light.
+            lv_index = sy-tabix.
+            ls_alv-sem = icon_red_light.
+            ls_alv-mess = gt_ret-message.
+            MODIFY gt_alv FROM ls_alv INDEX lv_index.
+          ENDLOOP.
+        ENDIF.
+        IF lv_commit IS INITIAL.
+          CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+        ENDIF.
+      ENDAT.
+      "boc by samim cr-4201
+    ELSE.
+      CLEAR: lv_requirement,lt_requirement_out,lt_return,lv_activ,
+             lt_schedule_in,lv_requirement1,lv_requirement2.
+      CALL FUNCTION 'BAPI_REQUIREMENTS_GETDETAIL'
+        EXPORTING
+          material         = ls_file_upd-matnr
+          plant            = p_werks
+          requirementstype = lv_requirement
+          version          = p_versb
+          reqmtsplannumber = p_pbdnr
+        TABLES
+          requirements_out = lt_requirement_out
+          return           = lt_return.
+
+      CLEAR : ls_schedule_in.
+
+      IF lt_requirement_out IS NOT INITIAL.
+        DATA(ls_req) = VALUE #( lt_requirement_out[ 1 ] OPTIONAL ).
+      ENDIF.
+      DATA(lv_date_type) = ls_req-date_type.
+      DATA(lv_unit) = ls_req-unit.
+      DATA(lv_prod_ves) = ls_req-bomexpl.
+      DATA(lv_bomexpl) = ls_req-bomexpl.
+
+      IF ls_file_upd-q1 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_01 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q1.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+
+      ENDIF.
+      IF ls_file_upd-q2 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_02 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q2.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file_upd-q3 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_03 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q3.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file_upd-q4 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_04 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q4.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file_upd-q5 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_05 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q5.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file_upd-q6 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_06 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q6.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+
+
+      IF ls_file_upd-q7 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_07 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q7.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file_upd-q8 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_08 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q8.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file_upd-q9 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_09 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q9.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file_upd-q10 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_10 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q10.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file_upd-q11 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_11 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q11.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      IF ls_file_upd-q12 IS NOT INITIAL .
+        ls_schedule_in-date_type = lv_date_type.
+        ls_schedule_in-req_date = |{ p_start(4) }{ gc_mon_12 }{ p_start+6(2) }|.
+        ls_schedule_in-req_qty = ls_file_upd-q12.
+        ls_schedule_in-unit = lv_unit.
+        ls_schedule_in-bomexpl = lv_bomexpl.
+        ls_schedule_in-prod_ves = lv_prod_ves.
+        APPEND ls_schedule_in TO lt_schedule_in.
+        CLEAR : ls_schedule_in.
+      ENDIF.
+      CLEAR lt_return.
+      REFRESH lt_return.
+
+      CALL FUNCTION 'BAPI_REQUIREMENTS_CHANGE'
+        EXPORTING
+          material                 = ls_file_upd-matnr
+          plant                    = p_werks
+          requirementstype         = lv_requirement1
+          version                  = p_versb
+          reqmtsplannumber         = lv_requirement2
+          vers_activ               = lc_x
+          do_commit                = space
+          update_mode              = lc_x
+          delete_old               = lc_x
+          no_withdr                = lc_x
+        TABLES
+          requirements_schedule_in = lt_schedule_in
+          return                   = lt_return.
+      lv_tabix = gv_tabix.    " captured at top of LOOP
+
+      READ TABLE lt_return INTO ls_return WITH KEY type = lc_mode.
+      IF sy-subrc <> 0.
+        READ TABLE gt_alv INTO ls_alv INDEX lv_tabix.
+        IF sy-subrc = 0.
+          ls_alv-sem = icon_green_light.
+          MESSAGE s282 INTO ls_alv-mess.
+          IF cb_test IS INITIAL AND gv_exe = lc_x.
+            CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+              EXPORTING
+                wait = lc_x.
+            MESSAGE s281 INTO ls_alv-mess.
+          ELSE.
+            CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+      CLEAR ls_file_upd.
+
+    ENDIF.
+    "eoc by samim cr-4201
+  ENDLOOP.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  ERROR
+*&---------------------------------------------------------------------*
+FORM error USING p_message.
+
+  gt_alv-sem  = icon_red_light.
+  gt_alv-mess = p_message.
+  APPEND gt_alv.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  ERROR2
+*&---------------------------------------------------------------------*
+FORM error2 USING p_message.
+
+  gt_alv-sem  = icon_red_light.
+  gt_alv-mess = p_message.
+  MODIFY gt_alv INDEX gv_tabix.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  CALL_ALV
+*&---------------------------------------------------------------------*
+FORM call_alv.
+
+  DATA: ls_layout TYPE slis_layout_alv.
+
+  ls_layout-zebra             = 'X'.
+  ls_layout-colwidth_optimize = 'X'.
+
+  PERFORM field_catalog.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program       = sy-repid
+      i_callback_pf_status_set = 'SET_PF_STATUS'
+      i_callback_user_command  = 'USER_COMMAND'
+      is_layout                = ls_layout
+      it_fieldcat              = gt_fieldcat[]
+      i_save                   = 'A'
+    TABLES
+      t_outtab                 = gt_alv[].
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  FIELD_CATALOG
+*&---------------------------------------------------------------------*
+FORM field_catalog.
+
+  DATA: lv_head(10),
+        lv_index     TYPE sy-index,
+        lv_field(20).
+
+  FIELD-SYMBOLS: <date> TYPE d.
+
+  PERFORM fill_fieldcat USING 'GT_ALV' 'SEM'   ' ' text-a01.
+  PERFORM fill_fieldcat USING 'GT_ALV' 'MATNR' 'X' text-a02.
+  PERFORM fill_fieldcat USING 'GT_ALV' 'MEINS' ' ' text-a03.
+  DO gv_buckets TIMES.
+    lv_index = sy-index.
+    ASSIGN COMPONENT lv_index OF STRUCTURE gs_datum TO <date>.
+    WRITE <date> TO lv_head.
+    lv_field = lv_index.
+    SHIFT lv_field LEFT DELETING LEADING space.
+    CONCATENATE 'Q' lv_field INTO lv_field.
+    PERFORM fill_fieldcat USING 'GT_ALV' lv_field ' ' lv_head.
+  ENDDO.
+  PERFORM fill_fieldcat USING 'GT_ALV' 'MESS'  ' ' text-a04.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  FILL_FIELDCAT
+*&---------------------------------------------------------------------*
+FORM fill_fieldcat USING p_table p_field p_nozero p_text.
+
+  CLEAR gt_fieldcat.
+  gt_fieldcat-tabname   = p_table.
+  gt_fieldcat-fieldname = p_field.
+  gt_fieldcat-no_zero   = p_nozero.
+  gt_fieldcat-seltext_l = p_text.
+  APPEND gt_fieldcat.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  SET_PF_STATUS
+*&---------------------------------------------------------------------*
+FORM set_pf_status USING f_excl TYPE slis_t_extab.
+  DATA fcode TYPE TABLE OF sy-ucomm.
+
+  IF cb_test = 'X'.
+    SET PF-STATUS 'ZSTANDARD' EXCLUDING 'EXE'.
+  ELSE.
+    SET PF-STATUS 'ZSTANDARD'.
+  ENDIF.
+
+ENDFORM.                    "PF_STATUS
+
+*------------------------------------------------------------------*
+*       FORM USER_COMMAND                                     *
+*------------------------------------------------------------------*
+*       --> R_UCOMM                                                *
+*       --> RS_SELFIELD                                            *
+*------------------------------------------------------------------*
+FORM user_command USING r_ucomm LIKE sy-ucomm
+                  rs_selfield TYPE slis_selfield.
+
+  rs_selfield-row_stable = 'X'.
+
+  CASE r_ucomm.
+    WHEN 'EXE'.
+      gv_exe = 'X'.
+      PERFORM create_orders2.
+*      MESSAGE s281.
+      CLEAR gv_exe.
+      rs_selfield-refresh = 'X'.
+  ENDCASE.
+
+
+ENDFORM.                    "USER_COMMAND
+
+*&---------------------------------------------------------------------*
+*&      Form  F4_TYPE
+*&---------------------------------------------------------------------*
+FORM f4_type.
+
+  DATA: BEGIN OF lt_value_tab OCCURS 0,
+          prgbz TYPE tprg-prgbz,
+          prgtx TYPE tprg-prgtx,
+        END OF lt_value_tab.
+
+  SELECT prgbz prgtx
+   FROM  tprg INTO TABLE lt_value_tab
+   WHERE spras =  sy-langu
+   AND   prgbz IN ('D', 'W', 'M').
+
+  CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+    EXPORTING
+      retfield        = 'PRGBZ'
+      dynpprog        = syst-cprog
+      dynpnr          = syst-dynnr
+      dynprofield     = 'P_TYPE'
+      window_title    = text-h01
+      value_org       = 'S'
+      multiple_choice = space
+    TABLES
+      value_tab       = lt_value_tab[]
+    EXCEPTIONS
+      parameter_error = 1
+      no_values_found = 2
+      OTHERS          = 3.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  F4_VERSB
+*&---------------------------------------------------------------------*
+FORM f4_versb.
+
+  DATA: BEGIN OF lt_value_tab OCCURS 0,
+          versb TYPE t459v-versb,
+          vbtxt TYPE t459v-vbtxt,
+        END OF lt_value_tab.
+
+  SELECT versb vbtxt
+   FROM  t459v INTO TABLE lt_value_tab
+   WHERE spras =  sy-langu
+   AND   versb IN ('00', 'Z1', 'Z2').
+
+  CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+    EXPORTING
+      retfield        = 'VERSB'
+      dynpprog        = syst-cprog
+      dynpnr          = syst-dynnr
+      dynprofield     = 'P_VERSB'
+      window_title    = text-h02
+      value_org       = 'S'
+      multiple_choice = space
+    TABLES
+      value_tab       = lt_value_tab[]
+    EXCEPTIONS
+      parameter_error = 1
+      no_values_found = 2
+      OTHERS          = 3.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  F_CHECK_QTY
+*&---------------------------------------------------------------------*
+FORM f_check_qty .
+
+  IF gt_file_ck-q60 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q60 TO UPPER CASE.
+    IF gt_file_ck-q60 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q59 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q59 TO UPPER CASE.
+    IF gt_file_ck-q59 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q58 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q58 TO UPPER CASE.
+    IF gt_file_ck-q58 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q57 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q57 TO UPPER CASE.
+    IF gt_file_ck-q57 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q56 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q56 TO UPPER CASE.
+    IF gt_file_ck-q56 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q55 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q55 TO UPPER CASE.
+    IF gt_file_ck-q55 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q54 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q54 TO UPPER CASE.
+    IF gt_file_ck-q54 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q53 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q53 TO UPPER CASE.
+    IF gt_file_ck-q53 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q52 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q52 TO UPPER CASE.
+    IF gt_file_ck-q52 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q51 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q51 TO UPPER CASE.
+    IF gt_file_ck-q51 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q50 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q50 TO UPPER CASE.
+    IF gt_file_ck-q50 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q49 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q49 TO UPPER CASE.
+    IF gt_file_ck-q49 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q48 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q48 TO UPPER CASE.
+    IF gt_file_ck-q48 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q47 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q47 TO UPPER CASE.
+    IF gt_file_ck-q47 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q46 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q46 TO UPPER CASE.
+    IF gt_file_ck-q46 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q45 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q45 TO UPPER CASE.
+    IF gt_file_ck-q45 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q44 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q44 TO UPPER CASE.
+    IF gt_file_ck-q44 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q43 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q43 TO UPPER CASE.
+    IF gt_file_ck-q43 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q42 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q42 TO UPPER CASE.
+    IF gt_file_ck-q42 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q41 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q41 TO UPPER CASE.
+    IF gt_file_ck-q41 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q40 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q40 TO UPPER CASE.
+    IF gt_file_ck-q40 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q39 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q39 TO UPPER CASE.
+    IF gt_file_ck-q39 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q38 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q38 TO UPPER CASE.
+    IF gt_file_ck-q38 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q37 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q37 TO UPPER CASE.
+    IF gt_file_ck-q37 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q36 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q36 TO UPPER CASE.
+    IF gt_file_ck-q36 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q35 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q35 TO UPPER CASE.
+    IF gt_file_ck-q35 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q34 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q34 TO UPPER CASE.
+    IF gt_file_ck-q34 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q33 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q33 TO UPPER CASE.
+    IF gt_file_ck-q33 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q32 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q32 TO UPPER CASE.
+    IF gt_file_ck-q32 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q31 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q31 TO UPPER CASE.
+    IF gt_file_ck-q31 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q30 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q30 TO UPPER CASE.
+    IF gt_file_ck-q30 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q29 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q29 TO UPPER CASE.
+    IF gt_file_ck-q29 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q28 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q28 TO UPPER CASE.
+    IF gt_file_ck-q28 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q27 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q27 TO UPPER CASE.
+    IF gt_file_ck-q27 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q26 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q26 TO UPPER CASE.
+    IF gt_file_ck-q26 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q25 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q25 TO UPPER CASE.
+    IF gt_file_ck-q25 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q24 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q24 TO UPPER CASE.
+    IF gt_file_ck-q24 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q23 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q23 TO UPPER CASE.
+    IF gt_file_ck-q23 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q22 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q22 TO UPPER CASE.
+    IF gt_file_ck-q22 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q21 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q21 TO UPPER CASE.
+    IF gt_file_ck-q21 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF..
+  ENDIF.
+  IF gt_file_ck-q20 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q20 TO UPPER CASE.
+    IF gt_file_ck-q20 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q19 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q19 TO UPPER CASE.
+    IF gt_file_ck-q19 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q18 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q18 TO UPPER CASE.
+    IF gt_file_ck-q18 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q17 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q17 TO UPPER CASE.
+    IF gt_file_ck-q17 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q16 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q16 TO UPPER CASE.
+    IF gt_file_ck-q16 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q15 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q15 TO UPPER CASE.
+    IF gt_file_ck-q15 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q14 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q14 TO UPPER CASE.
+    IF gt_file_ck-q14 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q13 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q13 TO UPPER CASE.
+    IF gt_file_ck-q13 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q12 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q12 TO UPPER CASE.
+    IF gt_file_ck-q12 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q11 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q11 TO UPPER CASE.
+    IF gt_file_ck-q11 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q10 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q10 TO UPPER CASE.
+    IF gt_file_ck-q10 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q9 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q9 TO UPPER CASE.
+    IF gt_file_ck-q9 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q8 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q8 TO UPPER CASE.
+    IF gt_file_ck-q8 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q7 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q7 TO UPPER CASE.
+    IF gt_file_ck-q7 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q6 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q6 TO UPPER CASE.
+    IF gt_file_ck-q6 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q5 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q5 TO UPPER CASE.
+    IF gt_file_ck-q5 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q4 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q4 TO UPPER CASE.
+    IF gt_file_ck-q4 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q3 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q3 TO UPPER CASE.
+    IF gt_file_ck-q3 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q2 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q2 TO UPPER CASE.
+    IF gt_file_ck-q2 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+  IF gt_file_ck-q1 IS NOT INITIAL.
+    TRANSLATE gt_file_ck-q1 TO UPPER CASE.
+    IF gt_file_ck-q1 CO '0123456789'.
+    ELSE.
+      gv_error = abap_true.
+      EXIT.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.
+
+"boc by samim cr-4201
+*&---------------------------------------------------------------------*
+*&      Form  READ_FILE_XLSX
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM read_file_xlsx .
+  CLEAR: ls_error, lt_error.
+  "----------------------------------------------------
+  " 1) Upload XLSX as binary
+  "----------------------------------------------------
+  CALL FUNCTION 'GUI_UPLOAD'
+    EXPORTING
+      filename   = p_file
+      filetype   = 'BIN'
+    IMPORTING
+      filelength = lv_filelength
+    TABLES
+      data_tab   = lt_records
+    EXCEPTIONS
+      OTHERS     = 1.
+
+  IF sy-subrc = 0.
+    "----------------------------------------------------
+    " 2) Convert binary to XSTRING
+    "----------------------------------------------------
+    CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
+      EXPORTING
+        input_length = lv_filelength
+      IMPORTING
+        buffer       = lv_xstring
+      TABLES
+        binary_tab   = lt_records
+      EXCEPTIONS
+        OTHERS       = 1.
+
+    IF lv_xstring IS NOT INITIAL.
+
+      "----------------------------------------------------
+      " 3) Load XLSX
+      "----------------------------------------------------
+      TRY.
+          lo_excel_ref = NEW cl_fdt_xl_spreadsheet(
+                           document_name = p_file
+                           xdocument     = lv_xstring ).
+        CATCH cx_fdt_excel_core INTO DATA(lx).
+          MESSAGE lx->get_text( ) TYPE lc_update.
+          RETURN.
+      ENDTRY.
+
+      "----------------------------------------------------
+      " 4) Get first worksheet
+      "----------------------------------------------------
+      lo_excel_ref->if_fdt_doc_spreadsheet~get_worksheet_names(
+        IMPORTING worksheet_names = lt_sheets ).
+
+      READ TABLE lt_sheets INTO lv_sheet INDEX 1.
+      IF sy-subrc =  0.
+        "----------------------------------------------------
+        " 5) Read worksheet content into dynamic internal table
+        "----------------------------------------------------
+        DATA(lo_data_ref) =
+            lo_excel_ref->if_fdt_doc_spreadsheet~get_itab_from_worksheet( lv_sheet ).
+
+        ASSIGN lo_data_ref->* TO <gt_data>.
+        IF <gt_data> IS NOT ASSIGNED OR <gt_data> IS INITIAL.
+          MESSAGE i380.
+          RETURN.
+        ENDIF.
+
+        "--- Remove header row (same as i_line_header = abap_true)
+        DELETE <gt_data> INDEX 1.
+
+        "----------------------------------------------------
+        " 6) Map dynamic table into your typed table gt_file_xlsx
+        "----------------------------------------------------
+        CLEAR gt_file_xlsx.
+
+        "Determine number of fields in your structure
+        DATA(ls_dummy) = VALUE lt_file_xlsx( ).
+        DATA(lo_struct) = CAST cl_abap_structdescr(
+                             cl_abap_typedescr=>describe_by_data( ls_dummy ) ).
+        DATA(lv_cols) = lines( lo_struct->components ).
+
+        LOOP AT <gt_data> ASSIGNING <ls_row>.
+          APPEND INITIAL LINE TO gt_file_xlsx ASSIGNING FIELD-SYMBOL(<ls_out>).
+
+          DO lv_cols TIMES.
+            ASSIGN COMPONENT sy-index OF STRUCTURE <ls_row> TO <fs_src>.
+            IF <fs_src> IS NOT ASSIGNED.
+              EXIT.
+            ENDIF.
+
+            ASSIGN COMPONENT sy-index OF STRUCTURE <ls_out> TO <fs_dst>.
+            IF <fs_dst> IS ASSIGNED.
+              <fs_dst> = <fs_src>.
+            ENDIF.
+
+            UNASSIGN <fs_src>.
+            UNASSIGN <fs_dst>.
+          ENDDO.
+        ENDLOOP.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+  IF gt_file_xlsx IS NOT INITIAL.
+    LOOP AT gt_file_xlsx INTO DATA(ls_data).
+      APPEND VALUE #( sign = lc_sign option = lc_option low = |{ ls_data-incomfld ALPHA = IN }| ) TO lr_matnr.
+    ENDLOOP.
+    SORT: gt_file_xlsx BY incomfld.
+    IF p_kdmat = abap_true.
+      SELECT vkorg,
+             vtweg,
+             kunnr,
+             matnr,
+             kdmat,
+             meins
+            FROM knmt
+            INTO TABLE @DATA(lt_knmt)
+            FOR ALL ENTRIES IN @gt_file_xlsx
+             WHERE kdmat = @gt_file_xlsx-incomfld.
+    ELSE.
+      IF lr_matnr IS NOT INITIAL.
+        SELECT matnr FROM mara INTO TABLE @DATA(lt_mara)
+          WHERE matnr IN @lr_matnr.
+      ENDIF.
+    ENDIF.
+    SORT: gt_file_xlsx BY incomfld,
+          lt_knmt      BY kdmat matnr,
+          lt_mara      BY matnr.
+
+    LOOP AT lt_knmt INTO DATA(ls_knmt).
+
+      " Check if Excel has this kdmat
+      READ TABLE gt_file_xlsx INTO DATA(gs_file_xlsx)
+           WITH KEY incomfld = ls_knmt-kdmat
+           BINARY SEARCH.
+
+      IF sy-subrc = 0.
+
+        " First time we see this kdmat
+        IF lv_prev_kdmat IS INITIAL OR lv_prev_kdmat <> ls_knmt-kdmat.
+          lv_prev_kdmat = ls_knmt-kdmat.
+          lv_prev_matnr = ls_knmt-matnr.
+
+        ELSE.
+          " Same kdmat again → check matnr consistency
+          IF lv_prev_matnr <> ls_knmt-matnr.
+*            lv_error = abap_true.
+            APPEND lv_prev_kdmat TO lt_error.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+
+    CONCATENATE LINES OF lt_error INTO ls_error SEPARATED BY ', '.
+
+*    IF lv_error = abap_true.
+    IF ls_error IS NOT INITIAL.
+      MESSAGE i517 WITH ls_error DISPLAY LIKE lc_mode.
+      EXIT.
+    ELSE.
+      CLEAR : gs_file_xlsx,ls_knmt.
+      LOOP AT gt_file_xlsx INTO gs_file_xlsx.
+
+        READ TABLE lt_knmt INTO ls_knmt
+             WITH KEY kdmat = gs_file_xlsx-incomfld
+             BINARY SEARCH.
+        IF sy-subrc = 0.
+          CLEAR gs_alv.
+          gs_alv = CORRESPONDING #( ls_knmt ).
+          gs_alv = CORRESPONDING #( BASE ( gs_alv ) gs_file_xlsx ).
+          APPEND gs_alv TO gt_file_ck.
+          CLEAR: gs_alv.
+        ELSE.
+          DATA(lv_matnr) = CONV matnr( gs_file_xlsx-incomfld ).
+          lv_matnr = |{ lv_matnr ALPHA = IN }|.
+
+          READ TABLE lt_mara INTO DATA(ls_mara)
+           WITH KEY matnr =  lv_matnr
+           BINARY SEARCH.
+          IF sy-subrc = 0.
+            CLEAR gs_alv.
+            gs_alv = CORRESPONDING #( ls_mara ).
+            gs_alv = CORRESPONDING #( BASE ( gs_alv ) gs_file_xlsx ).
+            APPEND gs_alv TO gt_file_ck.
+            CLEAR:gs_alv,lv_matnr.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      CLEAR : gs_file_xlsx,ls_knmt.
+    ENDIF.
+
+  ENDIF.
+  SORT gt_file_ck BY matnr.
+  IF gt_file_ck[] IS NOT INITIAL.
+    LOOP AT gt_file_ck INTO DATA(ls_ck).
+      CLEAR gt_file.
+      gt_file = CORRESPONDING #( ls_ck ).
+      APPEND gt_file.
+      CLEAR:ls_ck.
+    ENDLOOP.
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  MD62_DELETE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM md62_delete .
+  SELECT matnr,
+   werks,
+   bedae,
+   versb,
+   pbdnr,bdzei FROM pbim INTO TABLE @DATA(lt_pbim) FOR ALL ENTRIES IN
+                     @gt_file_ck WHERE matnr = @gt_file_ck-matnr AND
+                     werks = @p_werks AND
+                     versb = @p_versb AND
+                     pbdnr = @p_pbdnr AND
+                     loevr = @space.
+  IF sy-subrc = 0.
+    SORT lt_pbim BY matnr.
+  ENDIF.
+  LOOP AT gt_file INTO DATA(ls_file).
+
+    IF ls_file-q1  IS INITIAL
+    AND ls_file-q2  IS INITIAL
+    AND ls_file-q3  IS INITIAL
+    AND ls_file-q4  IS INITIAL
+    AND ls_file-q5  IS INITIAL
+    AND ls_file-q6  IS INITIAL
+    AND ls_file-q7  IS INITIAL
+    AND ls_file-q8  IS INITIAL
+    AND ls_file-q9  IS INITIAL
+    AND ls_file-q10 IS INITIAL
+    AND ls_file-q11 IS INITIAL
+    AND ls_file-q12 IS INITIAL.
+
+      APPEND ls_file TO gt_file_delete.
+      CLEAR ls_file.
+    ELSE.
+      READ TABLE lt_pbim ASSIGNING FIELD-SYMBOL(<fs_pbim>) WITH KEY matnr = ls_file-matnr
+                                                                    werks = p_werks
+                                                                    versb = p_versb
+                                                                    pbdnr = p_pbdnr  BINARY SEARCH.
+      IF sy-subrc = 0.
+        APPEND ls_file TO gt_file_update.
+        CLEAR ls_file.
+      ELSE.
+        APPEND ls_file TO gt_file_create.
+        CLEAR ls_file.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+  LOOP AT gt_file_delete ASSIGNING FIELD-SYMBOL(<fs_file>).
+    READ TABLE lt_pbim ASSIGNING FIELD-SYMBOL(<fs_pbim2>) WITH KEY
+    matnr = <fs_file>-matnr
+    werks = p_werks
+    versb = p_versb
+    pbdnr = p_pbdnr
+     BINARY SEARCH.
+    IF sy-subrc = 0.
+
+      gs_cm60r-trtyp = lc_v.
+      gs_cm60r-commi = lc_x.
+      gs_cm60r-upddc = lc_x.
+      gs_cm60r-delkz = lc_x.
+      gs_cm60r-status = lc_v.
+
+
+      gs_pbpt-matnr = <fs_pbim2>-matnr.
+      gs_pbpt-werks = p_werks.
+      gs_pbpt-bedae = <fs_pbim2>-bedae.
+      gs_pbpt-versb = <fs_pbim2>-versb.
+      gs_pbpt-updkz = lc_d.
+
+
+      APPEND gs_pbpt TO gt_pbpt.
+      CLEAR gs_pbpt.
+
+      CALL FUNCTION 'REQUIREMENTS_MAINTAIN'
+        EXPORTING
+          ecm60r = gs_cm60r
+          ecm60a = gs_cm60a
+        TABLES
+          epbpt  = gt_pbpt
+          iproto = gt_pbmsg
+        EXCEPTIONS
+          error  = 1
+          OTHERS = 2.
+      IF sy-subrc <> 0.
+* Implement suitable error handling here
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+ENDFORM.
+"eoc by samim cr-4201
+
+=================================================================================================
+
+
+**&---------------------------------------------------------------------*
+**&  Include           ZX60EU02
+**&---------------------------------------------------------------------*
+
+CONSTANTS: lc_tcode TYPE sy-tcode VALUE 'ZPL_UPLOAD_FORECAST',
+           lc_del   TYPE c        VALUE 'D'.
+
+DATA lv_all_zero TYPE abap_bool VALUE abap_true.
+
+IF sy-tcode = lc_tcode.
+  IF fxpbpt IS NOT INITIAL AND fxpbet IS NOT INITIAL.
+    "If any record has PLNMG not initial / not zero -> not all zero
+    LOOP AT fxpbet ASSIGNING FIELD-SYMBOL(<fs_bet>)
+         WHERE plnmg IS NOT INITIAL.
+        lv_all_zero = abap_false.
+        EXIT.
+    ENDLOOP.
+    IF lv_all_zero = abap_true.
+      LOOP AT fxpbpt ASSIGNING FIELD-SYMBOL(<fs_pbpt>).
+        <fs_pbpt>-updkz = lc_del.
+      ENDLOOP.
+    ENDIF.
+
+  ENDIF.
+
+ENDIF.
