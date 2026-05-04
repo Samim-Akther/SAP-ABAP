@@ -1,0 +1,1404 @@
+ther is a standard fm and seda have already done implicit  enhancement here and here they were controlling the 
+me22n like all the condition type and there netprice value should be not editable 
+and they have asked some new changes and then i have added the ptp20 code here 
+and there there is user exit z user exit theyy have used for some enhancement for the same scenarion and there i also have added some code 
+to fullfill the requirement and also there was a filed where i have passed as blank in the another include and achieve the target.
+ here i have used ai for solutioning.
+
+
+FUNCTION mepobadi_fs_item.
+*"----------------------------------------------------------------------
+*"*"Lokale Schnittstelle:
+*"  IMPORTING
+*"     REFERENCE(IM_HEADER) TYPE REF TO  IF_PURCHASE_ORDER_MM
+*"     REFERENCE(IM_ITEM) TYPE REF TO  IF_PURCHASE_ORDER_ITEM_MM
+*"     REFERENCE(IM_INITIATOR) TYPE  MEPO_INITIATOR OPTIONAL
+*"  CHANGING
+*"     REFERENCE(CH_FIELDSELECTION) TYPE  TTYP_FIELDSELECTION_MM
+*"----------------------------------------------------------------------
+*
+* define local data objects
+  DATA: lo_badi           TYPE REF TO lcl_badi,
+        lo_badi_ibs       TYPE REF TO me_process_po,
+        lo_badi_cust      TYPE REF TO me_process_po_cust,
+        ls_document       TYPE mepo_document,
+        lt_fieldselection TYPE ttyp_fieldselection_mm.
+
+  FIELD-SYMBOLS: <fs1> LIKE LINE OF lt_fieldselection,
+                 <fs2> LIKE LINE OF lt_fieldselection.
+
+*
+* get local BAdI instance handler
+  lo_badi = lcl_badi=>get_instance( ).
+* instantiate SAP internal BAdI first, as it may have multiple implementations
+  lo_badi_ibs ?= lo_badi->get_badi( lo_badi->mc_po_ibs ).
+  ls_document-initiator = im_initiator.
+  IF im_initiator IS INITIAL.
+    PERFORM mepo_xpd_get_document
+            IN PROGRAM saplmepo
+            CHANGING ls_document.
+  ENDIF.
+
+  CALL BADI lo_badi_ibs->fieldselection_item
+    EXPORTING
+      im_header         = im_header
+      im_item           = im_item
+      im_initiator      = ls_document-initiator
+    CHANGING
+      ch_fieldselection = ch_fieldselection.
+*
+* instantiate customer BAdI -> only one active implementation allowed
+  lo_badi_cust ?= lo_badi->get_badi( lo_badi->mc_po_cust ).
+  IF lo_badi_cust IS BOUND.
+* firewall
+    LOOP AT ch_fieldselection ASSIGNING <fs1> WHERE metafield GE mmmfd_cust_01.
+      INSERT <fs1> INTO TABLE lt_fieldselection.
+    ENDLOOP.
+    IF sy-subrc IS INITIAL.
+      CALL BADI lo_badi_cust->fieldselection_item
+        EXPORTING
+          im_header         = im_header
+          im_item           = im_item
+        CHANGING
+          ch_fieldselection = lt_fieldselection.
+      LOOP AT lt_fieldselection ASSIGNING <fs2>.
+        READ TABLE ch_fieldselection ASSIGNING <fs1> WITH TABLE KEY
+                                metafield = <fs2>-metafield.
+        IF sy-subrc IS INITIAL.
+          <fs1>-fieldstatus = <fs2>-fieldstatus.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+  ENDIF.
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""$"$\SE:(1) Function Module MEPOBADI_FS_ITEM, End                                                                                                             A
+*$*$-Start: (1)---------------------------------------------------------------------------------$*$*
+ENHANCEMENT 1  ZMEPO_ITEM_CUST.    "active version
+DATA: lt_zxenhanc TYPE TABLE OF zxenhanc,
+      ls_zxenhanc LIKE LINE OF lt_zxenhanc.
+DATA:
+    wa_hrranges TYPE                  hrranges,
+    lt_hrranges  TYPE STANDARD TABLE OF hrranges.
+
+ranges: gr_metafield FOR MMPUR_FS-METAFIELD.
+DATA: wa_param TYPE                  hrranges,
+      lt_param TYPE STANDARD TABLE OF hrranges.
+DATA lr_metafield LIKE LINE OF gr_metafield.
+
+FIELD-SYMBOLS: <fs>   LIKE LINE OF ch_fieldselection,
+               <item> TYPE purchase_order_item.
+
+RANGES: lr_bukrs FOR ekpo-bukrs,
+        lr_bsart FOR ekko-bsart.
+
+DATA: lr_bsart_int TYPE RANGE OF ekko-bsart,
+      lr_ktokk_int TYPE RANGE OF lfa1-ktokk.
+
+ DATA: l_mepoheader TYPE mepoheader.
+
+    DATA: lt_items     TYPE purchase_order_items,
+          ls_item_data TYPE mepoitem.
+
+    DATA: lt_zlauth TYPE STANDARD TABLE OF zlauth,
+          lw_zlauth TYPE zlauth.
+
+    DATA: BEGIN OF lw_eine,
+            infnr TYPE eine-infnr,
+            ekorg TYPE eine-ekorg,
+            esokz TYPE eine-esokz,
+            werks TYPE eine-werks,
+            matnr TYPE eina-matnr,
+            lifnr TYPE eina-lifnr,
+          END OF lw_eine.
+
+    DATA: BEGIN OF lw_a017,
+            kappl TYPE a017-kappl,
+            kschl TYPE a017-kschl,
+            lifnr TYPE a017-lifnr,
+            matnr TYPE a017-matnr,
+            ekorg TYPE a017-ekorg,
+            werks TYPE a017-werks,
+            esokz TYPE a017-esokz,
+            datbi TYPE a017-datbi,
+            datab TYPE a017-datab,
+            knumh TYPE a017-knumh,
+          END OF lw_a017.
+
+
+    DATA: BEGIN OF lw_konp,
+            knumh TYPE konp-knumh,
+            kopos TYPE konp-kopos,
+            kbetr TYPE konp-kbetr,
+          END OF lw_konp.
+
+    DATA l_type_doc.
+    DATA: l_matkl       TYPE ekpo-matkl,
+          n             TYPE i,
+          l_no_editable.
+
+DATA: lw_set_values TYPE rgsb4,
+          lw_range      TYPE selopt.
+    DATA: lt_set_values TYPE STANDARD TABLE OF rgsb4,
+          lt_range      TYPE STANDARD TABLE OF selopt,
+          l_nome_set    TYPE char24,
+          l_table       TYPE rgsbs-table,
+          l_field       TYPE fieldname.
+
+ CONSTANTS: lc_2 TYPE char1 VALUE '2',
+               lc_3 TYPE char1 VALUE '3',
+               lc_f TYPE char1 VALUE 'F',
+               lc_e TYPE char1 VALUE 'E',
+               lc_x TYPE char1 VALUE 'X'.
+
+  DATA: li_items_no_edit TYPE STANDARD TABLE OF komp,
+        ls_komp          TYPE komp.
+
+* start s.i. - PTP_20
+ data: lv_listino      type c,
+       lv_contratto    type c,
+       lv_matnr_set    type c,
+       lv_all_edit     type c,
+       lv_edit_svarv   type c,
+       lt_tcodes       TYPE TABLE OF hrranges.
+
+* end s.i. - PTP_20
+****added by SAMIM as part of PTP 20
+*            DATA: ls_eine TYPE eine,
+*                  ls_ekpo_20 TYPE ekpo,
+*                  ls_ekko_20_ebeln TYPE EBELN,
+*                  lv_modif_flag TYPE flag,
+*                   ls_eine_20 TYPE eine,
+*                   lw_set_values20 TYPE rgsb4,
+*                   lw_range20      TYPE selopt,
+*                   lt_set_values20 TYPE STANDARD TABLE OF rgsb4,
+*                   lt_range20     TYPE STANDARD TABLE OF selopt,
+*                    l_nome_set20    TYPE char24,
+*                     l_table20       TYPE rgsbs-table,
+*                    l_field20       TYPE fieldname,
+*                    lt_tcodes     TYPE TABLE OF hrranges.
+*        CONSTANTS :  lc_set_nome     TYPE char9 VALUE 'ZMATGROUP',
+*                     lc_pass_x       TYPE sy-datar VALUE 'X',
+*                      lc_table        TYPE rgsbs-table VALUE 'EKPO',
+*                      lc_field        TYPE fieldname VALUE 'MATKL',
+*                      lc_class        TYPE rgsbs-class VALUE '0000',
+*                      lc_i            TYPE char1 VALUE 'I',
+*                      lc_eq           TYPE char2 VALUE 'EQ',
+*                      lc_bt           TYPE char2 VALUE 'BT',
+*                      lc_zint         TYPE esart VALUE 'ZINT',
+*                      lc_ZMEPO_ITEM_CUST TYPE progname VALUE 'ZMEPO_ITEM_CUST',
+*                      lc_S_T_CODE_PTP20  TYPE rvari_vnam VALUE 'S_T CODE_PTP20',
+*                      lc_s               TYPE rsscr_kind VALUE 'S'.
+*
+*
+* CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+*  EXPORTING
+*    i_progname      = lc_ZMEPO_ITEM_CUST
+*    i_name          = lc_S_T_CODE_PTP20
+*    i_type          = lc_s
+*  TABLES
+*    it_hrranges     = lt_tcodes
+*  EXCEPTIONS
+*    wrong_type      = 1
+*    wrong_value     = 2
+*    inchoerent_type = 3
+*    OTHERS          = 4.
+*
+*IF sy-subrc = 0.
+*  SORT lt_tcodes BY low.
+*ENDIF.
+* IF lt_tcodes IS NOT INITIAL.
+*  EXPORT lt_tcodes TO MEMORY ID 'ZMEPO_ITEM_TCODES'.
+* ENDIF.
+****added by SAMIM as part of PTP 20
+
+* start s.i. - PTP_20
+*  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+*  EXPORTING
+*    i_progname      = 'ZMEPO_ITEM_CUST'
+*    i_name          = 'S_T CODE_PTP20'
+*    i_type          = 'S'
+*  TABLES
+*    it_hrranges     = lt_tcodes
+*  EXCEPTIONS
+*    wrong_type      = 1
+*    wrong_value     = 2
+*    inchoerent_type = 3
+*    OTHERS          = 4.
+*IF sy-subrc = 0.
+*  SORT lt_tcodes BY low.
+*ENDIF.
+* IF lt_tcodes IS NOT INITIAL.
+*  EXPORT lt_tcodes TO MEMORY ID 'ZMEPO_ITEM_TCODES'.
+* ENDIF.
+* end s.i. - PTP_20
+
+
+*** begin of insert ticket 1375 - 20181228
+AUTHORITY-CHECK OBJECT 'M_BEST_EKO' ID 'ACTVT' field '09'.
+
+if sy-subrc eq 0.
+*** end of insert ticket 1375 - 20181228
+
+  CLEAR: li_items_no_edit.
+  IMPORT li_items_no_edit[] FROM MEMORY ID 'ZMEPO_ITEM_CUST'.
+
+  REFRESH lt_zxenhanc. CLEAR ls_zxenhanc.
+    CALL FUNCTION 'ZXUN_READ_ENHANC'
+      EXPORTING
+        repid     = 'ZMEPO_ITEM_CUST'
+      TABLES
+        tb_enhanc = lt_zxenhanc
+      EXCEPTIONS
+        not_found = 1.
+
+  READ TABLE lt_zxenhanc INTO ls_zxenhanc WITH KEY zenhancement = 'ZMEPO_ITEM_CUST'
+                                                   zproject     = 'CLIC'
+                                                   zidgap       = 'NA_PGLS_202'
+                                                   zenhanctype  = 'U'
+                                                   zactivation  = 'X'.
+
+if sy-subrc = 0.
+
+CLEAR: lt_param, gr_metafield.
+  REFRESH: lt_param, gr_metafield.
+
+  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+    EXPORTING
+      i_progname      = 'ZMEPO_ITEM_CUST'
+      i_name          = 'S_METAFIELD'
+      i_type          = 'S'
+*      i_numb          = p_numb
+    TABLES
+      it_hrranges     = lt_param
+    EXCEPTIONS
+      wrong_type      = 1
+      wrong_value     = 2
+      inchoerent_type = 3
+      OTHERS          = 4.
+
+  IF sy-subrc EQ 0.
+    LOOP AT lt_param INTO wa_param.
+
+      lr_metafield-sign = wa_param-sign.
+      lr_metafield-option = wa_param-opti.
+      lr_metafield-low = wa_param-low .
+      APPEND lr_metafield TO gr_metafield.
+    ENDLOOP.
+  ENDIF.
+        CLEAR: lt_param[],
+         lr_bukrs,
+         lr_bukrs[],
+         wa_param.
+  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+    EXPORTING
+      i_progname      = 'ZMEPO_HEADER_CUST'
+      i_name          = 'S_BUKRS'
+      i_type          = 'S'
+*      i_numb          = p_numb
+    TABLES
+      it_hrranges     = lt_param
+    EXCEPTIONS
+      wrong_type      = 1
+      wrong_value     = 2
+      inchoerent_type = 3
+      OTHERS          = 4.
+  IF sy-subrc EQ 0.
+    LOOP AT lt_param INTO wa_param.
+      lr_bukrs-sign = wa_param-sign.
+      lr_bukrs-option = wa_param-opti.
+      lr_bukrs-low = wa_param-low.
+      lr_bukrs-high = wa_param-high.
+      APPEND lr_bukrs.
+      CLEAR lr_bukrs.
+    ENDLOOP.
+  ENDIF.
+
+* Get Range for Document Type
+  CLEAR: lt_param[],
+         lr_bsart[],
+         lr_bsart,
+         wa_param.
+  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+    EXPORTING
+      i_progname      = 'ZMEPO_HEADER_CUST'
+      i_name          = 'S_BSART'
+      i_type          = 'S'
+*      i_numb          = p_numb
+    TABLES
+      it_hrranges     = lt_param
+    EXCEPTIONS
+      wrong_type      = 1
+      wrong_value     = 2
+      inchoerent_type = 3
+      OTHERS          = 4.
+  IF sy-subrc EQ 0.
+    LOOP AT lt_param INTO wa_param.
+      lr_bsart-sign = wa_param-sign.
+      lr_bsart-option = wa_param-opti.
+      lr_bsart-low = wa_param-low.
+      lr_bsart-high = wa_param-high.
+      APPEND lr_bsart.
+      CLEAR lr_bsart.
+    ENDLOOP.
+  ENDIF.
+
+* read header data in PO
+      CALL METHOD im_header->get_data
+        RECEIVING
+          re_data = l_mepoheader.
+
+* Check Document Type/Company Code
+  IF l_mepoheader-bukrs IN lr_bukrs AND
+     l_mepoheader-bsart IN lr_bsart.
+
+* * read item data in PO
+    CALL METHOD im_item->get_data
+      RECEIVING
+        re_data = ls_item_data.
+
+*   User authorization check
+      IF l_mepoheader-bstyp = lc_f. "PO
+        l_type_doc = lc_3.
+      ELSEIF l_mepoheader-bstyp = lc_e. "Contract
+        l_type_doc = lc_2 .
+      ENDIF.
+
+        CLEAR lw_zlauth.
+        REFRESH lt_zlauth.
+
+        n = 9.
+
+        WHILE n GE 2.
+
+          IF n = 9.
+            CLEAR l_matkl.
+            l_matkl = ls_item_data-matkl.
+          ELSEIF n = 6.
+            CLEAR l_matkl.
+            l_matkl(6) = ls_item_data-matkl(6).
+          ELSEIF n = 4.
+            CLEAR l_matkl.
+            l_matkl(4) = ls_item_data-matkl(4).
+          ELSEIF n = 2.
+            CLEAR l_matkl.
+            l_matkl(2) = ls_item_data-matkl(2).
+          ENDIF.
+
+          SELECT
+* start s.i. - PTP_20
+            mandt
+* end s.i. - PTP_20
+                 uname
+                 matkl
+                 ekorg
+                 zpurdoctype
+           FROM zlauth
+             APPENDING TABLE lt_zlauth
+            WHERE  uname = sy-uname
+              AND  matkl = l_matkl
+              AND  ekorg = l_mepoheader-ekorg
+              AND  zpurdoctype = lc_2.
+
+          IF n = 9.
+            CLEAR n.
+            n = 6.
+          ELSEIF n = 6.
+            CLEAR n.
+            n = 4.
+          ELSEIF n = 4.
+            CLEAR n.
+            n = 2.
+          ELSEIF n = 2.
+            CLEAR n.
+          ENDIF.
+
+        ENDWHILE.
+        IF lt_zlauth[] IS NOT INITIAL.
+          FREE MEMORY ID 'ZMEPO_ITEM_CUST'.
+        ENDIF.
+
+        CHECK lt_zlauth[] IS INITIAL .
+*        AND lt_zlaut[] IS INITIAL.
+* >> Begin of SEDA_PTP_NR_89
+* Document type/Vendor type check
+  CLEAR: lt_param[],
+         wa_param.
+
+  FREE: lr_bsart_int.
+
+  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+    EXPORTING
+      i_progname      = 'ZMEPO_HEADER_CUST'
+      i_name          = 'S_BSART_INT'
+      i_type          = 'S'
+*      i_numb          = p_numb
+    TABLES
+      it_hrranges     = lt_param
+    EXCEPTIONS
+      wrong_type      = 1
+      wrong_value     = 2
+      inchoerent_type = 3
+      OTHERS          = 4.
+  IF sy-subrc = 0.
+    LOOP AT lt_param INTO wa_param.
+      APPEND INITIAL LINE TO lr_bsart_int ASSIGNING FIELD-SYMBOL(<fs_bsart_int>).
+      IF <fs_bsart_int> IS ASSIGNED.
+        <fs_bsart_int>-sign = wa_param-sign.
+        <fs_bsart_int>-option = wa_param-opti.
+        <fs_bsart_int>-low = wa_param-low.
+        UNASSIGN <fs_bsart_int>.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  IF l_mepoheader-bukrs IN lr_bukrs AND
+     l_mepoheader-bsart IN lr_bsart_int.
+
+   CLEAR: lt_param[],
+         wa_param.
+
+    FREE: lr_ktokk_int.
+      CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+      EXPORTING
+        i_progname      = 'ZMEPO_HEADER_CUST'
+        i_name          = 'S_KTOKK_INT'
+        i_type          = 'S'
+*        i_numb          = p_numb
+      TABLES
+        it_hrranges     = lt_param
+      EXCEPTIONS
+        wrong_type      = 1
+        wrong_value     = 2
+        inchoerent_type = 3
+        OTHERS          = 4.
+    IF sy-subrc = 0.
+      LOOP AT lt_param INTO wa_param.
+        APPEND INITIAL LINE TO lr_ktokk_int ASSIGNING FIELD-SYMBOL(<fs_ktokk_int>).
+        IF <fs_ktokk_int> IS ASSIGNED.
+          <fs_ktokk_int>-sign = wa_param-sign.
+          <fs_ktokk_int>-option = wa_param-opti.
+          <fs_ktokk_int>-low = wa_param-low.
+          UNASSIGN <fs_ktokk_int>.
+        ENDIF.
+      ENDLOOP.
+      SELECT SINGLE @abap_true INTO @DATA(lv_intercompany_vendor)
+        FROM lfa1 WHERE lifnr = @l_mepoheader-lifnr AND ktokk IN @lr_ktokk_int.
+    ENDIF.
+  ENDIF.
+  IF lv_intercompany_vendor IS INITIAL. "è NB
+* << End of SEDA_PTP_NR_89
+*   Material group check
+        REFRESH: lt_set_values, lt_range.
+        CLEAR:   lw_set_values, lw_range.
+        l_nome_set = 'ZMATGROUP'.
+        l_table    = 'EKPO'.
+        l_field    = 'MATKL'.
+        CALL FUNCTION 'G_SET_GET_ALL_VALUES'
+          EXPORTING
+            client          = sy-mandt
+            setnr           = l_nome_set "ZMATGROUP
+            table           = l_table    "EKPO
+            class           = '0000'
+            no_descriptions = 'X'
+            no_rw_info      = 'X'
+            fieldname       = l_field    "MATKL
+          TABLES
+            set_values      = lt_set_values
+          EXCEPTIONS
+            set_not_found   = 1
+            OTHERS          = 2.
+
+        CASE sy-subrc.
+          WHEN '0'.
+          WHEN OTHERS.
+        ENDCASE.
+
+        LOOP AT lt_set_values INTO lw_set_values.
+          lw_range-low = lw_set_values-from.
+          lw_range-high = lw_set_values-to.
+          lw_range-sign = 'I'.
+          IF lw_set_values-to EQ lw_set_values-from.
+            lw_range-option = 'EQ'.
+          ELSE.
+            lw_range-option = 'BT'.
+          ENDIF.
+          APPEND lw_range TO lt_range.
+        ENDLOOP.
+
+        IF ls_item_data-matkl IN lt_range.
+* start s.i. - PTP_20
+          lv_matnr_set = 'X'.
+*          l_no_editable = lc_x.
+* end s.i. - PTP_20
+         ENDIF.
+  ENDIF.
+* << End of SEDA_PTP_NR_89
+
+*   Inforecord check
+          CLEAR lw_eine.
+          SELECT SINGLE e~infnr e~ekorg e~esokz e~werks a~matnr a~lifnr
+              INTO lw_eine
+              FROM  eine AS e INNER JOIN eina AS a  ON e~infnr = a~infnr
+              WHERE e~infnr = ls_item_data-infnr
+                AND e~esokz = ls_item_data-pstyp
+                AND e~werks = ls_item_data-werks
+                AND e~loekz = space.
+
+          IF NOT lw_eine IS INITIAL.
+            CLEAR lw_a017.
+            SELECT SINGLE kappl
+                          kschl
+                          lifnr
+                          matnr
+                          ekorg
+                          werks
+                          esokz
+                          datbi
+                          datab
+                          knumh
+                INTO lw_a017
+                FROM  a017
+                WHERE lifnr = lw_eine-lifnr
+                  AND matnr = lw_eine-matnr
+                  AND ekorg = lw_eine-ekorg
+                  AND werks = lw_eine-werks
+                  AND datbi >= l_mepoheader-bedat
+                  AND datab <= l_mepoheader-bedat.
+            IF sy-subrc IS INITIAL.
+              SELECT SINGLE knumh
+                            kopos
+                            kbetr
+                            INTO lw_konp
+                           FROM  konp
+                           WHERE knumh = lw_a017-knumh.
+              IF sy-subrc IS INITIAL .
+* start s.i. - PTP_20
+*                l_no_editable = lc_x.
+                lv_listino = 'X'.
+* end s.i. - PTP_20
+              ENDIF.
+*
+            ENDIF.
+
+          else.
+*      Modifiche 18/04/2018 - begin
+                     CLEAR lw_eine.
+                     SELECT SINGLE e~infnr e~ekorg e~esokz e~werks a~matnr a~lifnr
+                         INTO lw_eine
+                         FROM  eine AS e INNER JOIN eina AS a  ON e~infnr = a~infnr
+                         WHERE e~infnr = ls_item_data-infnr
+                           AND e~esokz = ls_item_data-pstyp
+                           AND e~werks = space
+                           AND e~loekz = space.
+                     IF NOT lw_eine IS INITIAL.
+                             SELECT single    kappl,
+                                        kschl,
+                                        lifnr,
+                                        matnr,
+                                        ekorg,
+                                        esokz,
+                                        datbi,
+                                        datab,
+                                        knumh
+                              from a018
+                              into  @data(lw_a018)
+                              WHERE lifnr = @lw_eine-lifnr
+                                AND matnr = @lw_eine-matnr
+                                AND ekorg = @lw_eine-ekorg
+                                AND datbi >= @l_mepoheader-bedat
+                               AND datab <= @l_mepoheader-bedat.
+                           IF sy-subrc IS INITIAL.
+                                  SELECT SINGLE knumh
+                                                kopos
+                                                kbetr
+                                                INTO lw_konp
+                                               FROM  konp
+                                               WHERE knumh = lw_a018-knumh.
+*                                                AND  kbetr  > 0.
+                                    IF sy-subrc IS INITIAL .
+* start s.i. - PTP_20
+*                                       l_no_editable = lc_x.
+                                      lv_listino = 'X'.
+* end s.i. - PTP_20
+                                  ENDIF.
+                           endif.
+                  else.
+*      Modifiche 18/04/2018 - end
+*   Outline agreement check
+                        IF NOT ls_item_data-konnr IS INITIAL.
+* start s.i. - PTP_20
+*                          l_no_editable = lc_x.
+                          lv_contratto = 'X'.
+* end s.i. - PTP_20
+                        ENDIF.
+                  endif.
+          ENDIF.
+
+* start s.i. - PTP_20
+          IF lv_intercompany_vendor IS NOT INITIAL. "ZINT
+            IF lv_contratto = 'X' or
+               lv_listino   = 'X'.
+              lv_edit_svarv = 'X'.
+              ELSE.
+                lv_all_edit    = 'X'.
+              ENDIF.
+            ELSE. "NB
+              CASE lv_matnr_set.
+                WHEN 'X'. "material in SET
+                  IF lv_contratto = 'X' or
+                     lv_listino   = 'X'.
+                      lv_edit_svarv = 'X'.
+                  ELSE.
+                      l_no_editable = 'X'.
+                  ENDIF.
+                  WHEN OTHERS. " material NOT in SET
+                    IF lv_contratto  = 'X' or
+                       lv_listino    = 'X'.
+                       lv_edit_svarv = 'X'.
+                    ELSE.
+                      lv_all_edit    = 'X'.
+                    ENDIF.
+                ENDCASE.
+              ENDIF.
+
+*              if lv_edit_svarv IS NOT INITIAL.
+*              loop at CH_FIELDSELECTION ASSIGNING <fs> where METAFIELD in gr_metafield[].
+*             <fs>-fieldstatus = '*'. "Non editabile
+*             endloop.
+*             endif.
+
+              EXPORT lv_edit_svarv TO MEMORY ID 'ZMEPO_MODIF_SVARV'.
+* end s.i. - PTP_20
+
+
+*"BOc by samim on PTP-20
+* IF sy-tcode IN lt_tcodes.
+*
+*  CLEAR ls_ekpo_20.
+*          ls_ekpo_20-ebeln = ls_item_data-ebeln.
+*          ls_ekpo_20-ebelp = ls_item_data-ebelp.
+*          ls_ekpo_20-infnr = ls_item_data-infnr.
+*          ls_ekpo_20-netpr = ls_item_data-netpr.
+*          ls_ekpo_20-konnr = ls_item_data-konnr.
+*
+*    IF ls_ekpo_20-konnr IS NOT INITIAL.
+*      CLEAR ls_ekko_20_ebeln.
+*      SELECT SINGLE
+*           ebeln
+*      INTO (ls_ekko_20_ebeln )
+*      FROM ekko
+*     WHERE ebeln = ls_ekpo_20-konnr
+*       AND kdate >= sy-datum
+*       AND loekz = space.
+*
+*        IF ls_ekko_20_ebeln IS NOT INITIAL.
+*            CLEAR ls_ekpo_20-netpr.
+*            SELECT SINGLE netpr
+*              INTO ls_ekpo_20-netpr
+*              FROM ekpo
+*             WHERE ebeln = ls_ekko_20_ebeln         "Contract number (validated)
+*               AND ebelp = ls_item_data-ebelp       "Same item as PO item
+*               AND loekz = space.
+*          ELSE.
+*            CLEAR ls_ekko_20_ebeln.
+*     ENDIF.
+*
+*    ELSEIF  ls_ekpo_20-infnr IS NOT INITIAL.
+*      CLEAR ls_eine_20.
+*
+*      SELECT SINGLE
+*             infnr
+*             ekorg
+*             esokz
+*             werks
+*             netpr
+*             prdat
+*        INTO (ls_eine_20-infnr,
+*              ls_eine_20-ekorg,
+*              ls_eine_20-esokz,
+*              ls_eine_20-werks,
+*              ls_eine_20-netpr,
+*              ls_eine_20-prdat)
+*        FROM eine
+*       WHERE infnr = ls_ekpo_20-infnr
+*         AND loekz = space
+*         AND prdat >= sy-datum.
+*    ENDIF.
+*        IF ls_ekko_20_ebeln IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr > 0.
+*            lv_modif_flag = abap_True.
+*            ELSE.
+*             lv_modif_flag = abap_false.
+*          ENDIF.
+*         ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr > 0.
+*                 lv_modif_flag = abap_True.
+*        ENDIF.
+*
+*
+*         CLEAR : lt_set_values20[],
+*          lt_range20[],
+*          lw_set_values20,
+*          lw_range20,
+*          l_table20,
+*          l_field20.
+*
+*  l_nome_set20 = lc_set_nome.
+*  l_table20    = lc_table.
+*  l_field20   = lc_field.
+*  CALL FUNCTION 'G_SET_GET_ALL_VALUES'
+*    EXPORTING
+*      client          = sy-mandt
+*      setnr           = l_nome_set20 "ZMATGROUP
+*      table           = l_table20    "EKPO
+*      class           = lc_class
+*      no_descriptions = lc_pass_x
+*      no_rw_info      = lc_pass_x
+*      fieldname       = l_field20   "MATKL
+*    TABLES
+*      set_values      = lt_set_values20
+*    EXCEPTIONS
+*      set_not_found   = 1
+*      OTHERS          = 2.
+*
+*  LOOP AT lt_set_values20 INTO lw_set_values20.
+*    lw_range20-low = lw_set_values20-from.
+*    lw_range20-high = lw_set_values20-to.
+*    lw_range20-sign = lc_i.
+*    IF lw_set_values20-to EQ lw_set_values20-from.
+*      lw_range20-option = lc_eq.
+*    ELSE.
+*      lw_range20-option = lc_bt.
+*    ENDIF.
+*    APPEND lw_range20 TO lt_range20.
+*    CLEAR : lw_range20,
+*            lw_set_values20.
+*  ENDLOOP.
+*
+*        IF ls_item_data-matkl NOT IN lt_range20.
+*
+*
+*        IF ls_ekko_20_ebeln IS NOT INITIAL AND ls_ekpo_20-konnr IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr = 0.
+*              lv_modif_flag = abap_True.
+*          ENDIF.
+*        ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr = 0.
+*            lv_modif_flag = abap_True.
+*        ENDIF.
+*
+*         IF ls_ekko_20_ebeln IS INITIAL AND ls_eine_20 IS INITIAL.
+*           lv_modif_flag = abap_True.
+*        ENDIF.
+*        ENDIF.
+*
+*        IF l_mepoheader-bsart = lc_zint AND  ls_item_data-matkl IN lt_range20.
+*
+*         IF ls_ekko_20_ebeln IS INITIAL AND ls_eine_20 IS INITIAL.
+*           lv_modif_flag = abap_True.
+*        ENDIF.
+*        ENDIF.
+*
+*         IF lv_modif_flag = abap_true.
+*         ELSE.
+*           lv_modif_flag = abap_false.
+*         ENDIF.
+*
+*  EXPORT lv_modif_flag TO MEMORY ID 'ZMEPO_ITEM_COND_20'.
+*  EXPORT ls_ekko_20_ebeln TO MEMORY ID 'ZMEPO_ITEM_EKKO_20'.
+*  EXPORT ls_ekpo_20 TO MEMORY ID 'ZMEPO_ITEM_EKPO_20'.
+*  EXPORT ls_eine_20 TO MEMORY ID 'ZMEPO_ITEM_EINE_20'.
+*  EXPORT lt_range20[] TO MEMORY ID 'ZMEPO_ITEM_RANGE_20'.
+*ENDIF.
+*"EOc by samim on PTP-20
+********************************************************************************************************************************
+********************************************************************************************************************************
+* Export Info to Item Conditions Tab Screen
+      IF l_no_editable IS NOT INITIAL.
+        READ TABLE li_items_no_edit
+        TRANSPORTING NO FIELDS
+        WITH KEY kposn = ls_item_data-ebelp.
+        IF sy-subrc IS NOT INITIAL.
+          CLEAR ls_komp.
+          ls_komp-kposn = ls_item_data-ebelp.
+          APPEND ls_komp TO li_items_no_edit.
+          CLEAR ls_komp.
+        ENDIF.
+      ELSE.
+        READ TABLE li_items_no_edit
+        TRANSPORTING NO FIELDS
+        WITH KEY kposn = ls_item_data-ebelp.
+        IF sy-subrc IS INITIAL.
+          DELETE li_items_no_edit INDEX sy-tabix.
+        ENDIF.
+      ENDIF.
+
+
+
+
+*      IF li_items_no_edit[] IS NOT INITIAL.
+      EXPORT li_items_no_edit[] TO MEMORY ID 'ZMEPO_ITEM_CUST'.
+*      ENDIF.
+* tab/fields must be not editable in the PO
+
+      CHECK NOT l_no_editable IS INITIAL.
+
+     loop at CH_FIELDSELECTION ASSIGNING <fs> where METAFIELD in gr_metafield[].
+             <fs>-fieldstatus = '*'. "Non editabile
+
+     endloop.
+
+  ELSE.
+    FREE MEMORY ID 'ZMEPO_ITEM_CUST'.
+
+  ENDIF. "Check Document Type/Company Code
+
+endif.
+
+*** begin of insert ticket 1375 - 20181228
+endif.
+
+*** end of insert ticket 1375 - 20181228
+ENDENHANCEMENT.
+*$*$-End:   (1)---------------------------------------------------------------------------------$*$*
+ENDFUNCTION.
+
+-----------------------------------------------------------------
+
+*&---------------------------------------------------------------------*
+*&  Include           ZI_MEPO_ITEM_COND
+*&---------------------------------------------------------------------*
+**********************************************************************
+*                    A D M I N I S T R A T I O N                     *
+**********************************************************************
+*  Program ID        : ZI_MEPO_ITEM_COND                             *
+*  Version           : NA                                            *
+*  SAP Version       : ECC 6.0                                       *
+*  Program Name      : ZI_MEPO_ITEM_COND                             *
+*  Created by        : CP                                            *
+*  Created on        : 02.03.2018                                    *
+*  Description       : Change field attributes for PO Item Conditions*
+**********************************************************************
+*                    C H A N G E  H I S T O R Y                      *
+**********************************************************************
+* Change Id   :                                            *
+* Author      :                                    *
+* Changed On  :                                            *
+* Request No  :                                            *
+* Description :             *
+**********************************************************************
+DATA: li_items_no_edit  TYPE STANDARD TABLE OF komp,
+      l_no_editable     TYPE char1,
+      lt_hrranges       TYPE STANDARD TABLE OF hrranges,
+      lv_fields_no_edit TYPE char1.
+
+* start s.i. - PTP_20
+DATA: lv_edit_svarv TYPE c,
+      ls_item_data  TYPE mepoitem,
+      wa_param      TYPE hrranges,
+      lt_param      TYPE STANDARD TABLE OF hrranges,
+      lr_kschl      TYPE RANGE OF komv-kschl,
+      lrs_kschl     LIKE LINE OF lr_kschl,
+      lt_tcodes     TYPE TABLE OF hrranges,
+      lv_change     TYPE MMPUR_BOOL.
+
+CONSTANTS: lc_komv_kschl   TYPE tvarv_val VALUE 'KOMV-KSCHL',
+           lc_screen_kbetr TYPE char10 VALUE 'KOMV-KBETR',
+           lc_screen_kschl TYPE char10 VALUE 'KOMV-KSCHL',
+           lc_6201         TYPE sy-dynnr VALUE '6201',
+           lc_0640         TYPE sy-dynnr VALUE '0640'.
+* end s.i. - PTP_20
+
+*********BOC BY SAMIM on PTP-20
+*DATA: lw_set_values    TYPE rgsb4,
+*      lw_range         TYPE selopt,
+*      lt_set_values    TYPE STANDARD TABLE OF rgsb4,
+*      lt_range20       TYPE STANDARD TABLE OF selopt,
+*      l_nome_set       TYPE char24,
+*      l_table          TYPE rgsbs-table,
+*      l_field          TYPE fieldname,
+*      lt_zlauth        TYPE STANDARD TABLE OF zlauth,
+*      lw_zlauth        TYPE zlauth,
+*      ls_ekpo_20       TYPE ekpo,
+*      ls_ekko_20_ebeln TYPE ebeln,
+*      ls_item_data     TYPE mepoitem,
+*      wa_param         TYPE hrranges,
+*      lt_param         TYPE STANDARD TABLE OF hrranges,
+*      lr_kschl         TYPE RANGE OF komv-kschl,
+*      lrs_kschl        LIKE LINE OF lr_kschl,
+*      ls_eine_20       TYPE eine,
+*      lv_modif_flag    TYPE flag,
+*      lt_tcodes     TYPE TABLE OF hrranges.
+*
+*
+*CONSTANTS : lc_screen_kbetr TYPE char10 VALUE 'KOMV-KBETR',
+*            lc_6201         TYPE sy-dynnr VALUE '6201',
+*            lc_0640         TYPE sy-dynnr VALUE '0640',
+*            lc_table        TYPE rgsbs-table VALUE 'EKPO',
+*            lc_field        TYPE fieldname VALUE 'MATKL',
+*            lc_set_nome     TYPE char9 VALUE 'ZMATGROUP',
+*            lc_pass_x       TYPE sy-datar VALUE 'X',
+*            lc_class        TYPE rgsbs-class VALUE '0000',
+*            lc_i            TYPE char1 VALUE 'I',
+*            lc_eq           TYPE char2 VALUE 'EQ',
+*            lc_bt           TYPE char2 VALUE 'BT',
+*            lc_2            TYPE zpurdoctype VALUE '2',
+*            lc_progname     TYPE progname VALUE 'ZMEPO_ITEM_CUST',
+*            lc_name         TYPE rvari_vnam VALUE 'S_KSCHL_PTP20',
+*            lc_s            TYPE rsscr_kind VALUE 'S',
+*            lc_zint         TYPE esart VALUE 'ZINT',
+*            lc_input_1      TYPE char1 VALUE '1',
+*            lc_input_0      TYPE char1 VALUE '0',
+*            lc_komv_kschl   TYPE tvarv_val VALUE 'KOMV-KSCHL'.
+*
+*CLEAR lv_modif_flag.
+*********EOC BY SAMIM on PTP-20
+
+CLEAR: lv_fields_no_edit,
+       l_no_editable,
+       li_items_no_edit[].
+
+
+IF komp-kposn IS INITIAL.
+* Header Conditions
+* Get Info From Enhancement Spot ZMEPO_HEADER_CUST
+  IMPORT l_no_editable FROM MEMORY ID 'ZMEPO_HEADER_CUST'.
+  IF l_no_editable IS NOT INITIAL.
+    lv_fields_no_edit = abap_true.
+  ENDIF.
+ELSE.
+* Item Conditions
+* Get Info From Enhancement Spot ZMEPO_ITEM_CUST
+  IMPORT li_items_no_edit[] FROM MEMORY ID 'ZMEPO_ITEM_CUST'.
+  READ TABLE li_items_no_edit
+  TRANSPORTING NO FIELDS
+  WITH KEY kposn = komp-kposn.
+  IF sy-subrc IS INITIAL.
+    lv_fields_no_edit = abap_true.
+  ENDIF.
+ENDIF.
+
+
+* start s.i. - PTP_20
+*free MEMORY ID 'ZMEPO_CUST_CHANGE'.
+  IMPORT lv_change FROM MEMORY ID 'ZMEPO_CUST_CHANGE'.
+
+IF lv_change IS NOT INITIAL.
+
+IMPORT lv_edit_svarv FROM MEMORY ID 'ZMEPO_MODIF_SVARV'.
+* end s.i. - PTP_20
+
+
+IF lv_fields_no_edit IS NOT INITIAL
+* start s.i. - PTP_20
+  OR lv_edit_svarv IS NOT INITIAL.
+* end s.i. - PTP_20
+
+* Get Fields to be changed
+  CLEAR: lt_hrranges[].
+  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+    EXPORTING
+      i_progname      = 'ZI_MEPO_ITEM_COND'
+      i_name          = 'FIELD_NO_EDIT'
+      i_type          = 'S'
+*     i_numb          = p_numb
+    TABLES
+      it_hrranges     = lt_hrranges[]
+    EXCEPTIONS
+      wrong_type      = 1
+      wrong_value     = 2
+      inchoerent_type = 3
+      OTHERS          = 4.
+  IF lt_hrranges[] IS NOT INITIAL.
+************added by Samim PTP20
+*    IMPORT lv_modif_flag FROM MEMORY ID 'ZMEPO_ITEM_COND_20'.
+*    IF lv_modif_flag = abap_true.
+*      DELETE lt_hrranges[] WHERE low = lc_komv_kschl.
+*    ENDIF.
+************added by Samim PTP20
+* start s.i. - PTP_20
+    IF lv_fields_no_edit IS NOT INITIAL.
+* end s.i. - PTP_20
+      IF screen-name IN lt_hrranges[].
+        screen-input = 0.
+      ENDIF.
+    ENDIF.  "PTP_20
+  ENDIF.
+
+ENDIF.
+
+* start s.i. - PTP_20
+*IMPORT lt_tcodes TO lt_tcodes FROM MEMORY ID 'ZMEPO_ITEM_TCODES'.
+
+IF lv_edit_svarv IS NOT INITIAL.
+*  IF sy-tcode IN lt_tcodes AND
+  IF screen-name = lc_screen_kbetr AND
+ ( sy-dynnr EQ lc_6201 OR sy-dynnr EQ lc_0640 ).
+
+    CLEAR lt_param.
+    CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+      EXPORTING
+        i_progname      = 'ZMEPO_ITEM_CUST'
+        i_name          = 'S_KSCHL_PTP20'
+        i_type          = 'S'
+      TABLES
+        it_hrranges     = lt_param
+      EXCEPTIONS
+        wrong_type      = 1
+        wrong_value     = 2
+        inchoerent_type = 3
+        OTHERS          = 4.
+
+    IF sy-subrc EQ 0.
+      LOOP AT lt_param INTO wa_param.
+        CLEAR lrs_kschl.
+        lrs_kschl-sign   = wa_param-sign.
+        lrs_kschl-option = wa_param-opti.
+        lrs_kschl-low    = wa_param-low .
+        APPEND lrs_kschl TO lr_kschl.
+      ENDLOOP.
+    ENDIF.
+
+    IF lr_kschl IS NOT INITIAL.
+      IF komv-kschl IN lr_kschl.
+        screen-input = 1.
+        MODIFY SCREEN.
+      ELSE.
+        IF komv-updkz = 'I'.
+          screen-input = 0.
+          MODIFY SCREEN.
+*          MESSAGE i019(zl_auth) with komv-kschl DISPLAY LIKE 'E'.
+        ELSE.
+          screen-input = 0.
+          MODIFY SCREEN.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+ENDIF.
+
+ENDIF.
+* end s.i. - PTP_20
+
+
+"BOC by samim for PTP20 07/01/2026
+*IMPORT lt_tcodes TO lt_tcodes FROM MEMORY ID 'ZMEPO_ITEM_TCODES'.
+*
+* IF sy-tcode IN lt_tcodes
+*  AND  screen-name = lc_screen_kbetr
+*  AND ( sy-dynnr EQ lc_6201 OR sy-dynnr EQ lc_0640 ).
+*
+*  CLEAR lt_zlauth.
+*  SELECT uname
+*         matkl
+*         ekorg
+*         zpurdoctype
+*   FROM zlauth
+*     INTO TABLE lt_zlauth
+*    WHERE  uname = sy-uname
+*      AND  matkl = komp-matkl
+*      AND  ekorg = komk-ekorg
+*      AND  zpurdoctype = lc_2.
+*  IF sy-subrc <> 0.
+*    CLEAR: lt_zlauth.
+*  ENDIF.
+*
+*  IMPORT lt_range20[] FROM MEMORY ID 'ZMEPO_ITEM_RANGE_20'.
+*  IMPORT ls_ekko_20_ebeln FROM MEMORY ID 'ZMEPO_ITEM_EKKO_20'.
+*  IMPORT ls_ekpo_20 FROM MEMORY ID 'ZMEPO_ITEM_EKPO_20'.
+*  IMPORT ls_eine_20 FROM MEMORY ID 'ZMEPO_ITEM_EINE_20'.
+*
+*  CLEAR lt_param.
+*  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+*    EXPORTING
+*      i_progname      = lc_progname
+*      i_name          = lc_name
+*      i_type          = lc_s
+*    TABLES
+*      it_hrranges     = lt_param
+*    EXCEPTIONS
+*      wrong_type      = 1
+*      wrong_value     = 2
+*      inchoerent_type = 3
+*      OTHERS          = 4.
+*
+*  IF sy-subrc EQ 0.
+*    LOOP AT lt_param INTO wa_param.
+*
+*      lrs_kschl-sign = wa_param-sign.
+*      lrs_kschl-option = wa_param-opti.
+*      lrs_kschl-low = wa_param-low .
+*      APPEND lrs_kschl TO lr_kschl.
+*      CLEAR : lrs_kschl,
+*              wa_param.
+*    ENDLOOP.
+*  ENDIF.
+*
+*  IF komk-bsart = lc_zint.
+*
+*    IF lt_zlauth[] IS NOT INITIAL.
+*      screen-input = lc_input_1.
+*      MODIFY SCREEN.
+*    ELSE.
+*
+*      IF komp-matkl IN lt_range20.
+****************"7
+*        IF ls_ekko_20_ebeln IS INITIAL AND ls_eine_20 IS INITIAL.
+*          screen-input = lc_input_1.
+*          MODIFY SCREEN.
+*        ENDIF.
+*
+******************"7
+****************"8
+*        IF ls_ekko_20_ebeln IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr > 0.
+*            IF komv-kschl IN lr_kschl.
+*              screen-input = lc_input_1.
+*              MODIFY SCREEN.
+*            ENDIF.
+*          ENDIF.
+*        ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr > 0.
+*          IF komv-kschl IN lr_kschl.
+*            screen-input = lc_input_1.
+*            MODIFY SCREEN.
+*          ENDIF.
+*        ENDIF.
+*
+******************"8
+****************"9
+*        IF ls_ekko_20_ebeln IS NOT INITIAL AND ls_ekpo_20-konnr IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr = 0.
+*            screen-input = lc_input_0.
+*            MODIFY SCREEN.
+*          ENDIF.
+*        ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr = 0.
+*          screen-input = lc_input_0.
+*          MODIFY SCREEN.
+*        ENDIF.
+*
+******************"9
+*      ELSE.
+****************"12
+*        IF  ls_ekko_20_ebeln IS INITIAL AND ls_eine_20 IS INITIAL.
+*          screen-input = lc_input_1.
+*          MODIFY SCREEN.
+*        ENDIF.
+*
+******************"12
+****************"10
+*        IF  ls_ekko_20_ebeln IS NOT INITIAL AND ls_ekpo_20-konnr IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr > 0.
+*            IF komv-kschl IN lr_kschl.
+*              screen-input = lc_input_1.
+*              MODIFY SCREEN.
+*            ENDIF.
+*          ENDIF.
+*        ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr > 0.
+*          IF komv-kschl IN lr_kschl.
+*            screen-input = lc_input_1.
+*            MODIFY SCREEN.
+*          ENDIF.
+*        ENDIF.
+*
+******************"10
+****************"11
+*        IF ls_ekko_20_ebeln IS NOT INITIAL AND ls_ekpo_20-konnr IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr = 0.
+*            screen-input = lc_input_1.
+*            MODIFY SCREEN.
+*          ENDIF.
+*
+*        ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr = 0.
+*          screen-input = lc_input_1.
+*          MODIFY SCREEN.
+*        ENDIF.
+*
+******************"11
+*      ENDIF.
+*    ENDIF.
+*
+*  ELSE.
+*
+*    IF lt_zlauth[] IS NOT INITIAL.
+*      screen-input = lc_input_1.
+*      MODIFY SCREEN.
+*
+*    ELSE.
+*
+*      IF komp-matkl IN lt_range20.
+*
+****************"1
+*        IF ls_ekko_20_ebeln IS INITIAL AND ls_eine_20 IS INITIAL.
+*          screen-input = lc_input_0.
+*          MODIFY SCREEN.
+*        ENDIF.
+*
+******************"1
+****************"2
+*        IF  ls_ekko_20_ebeln IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr > 0.
+*            IF komv-kschl IN lr_kschl.
+*              screen-input = lc_input_1.
+*              MODIFY SCREEN.
+*            ENDIF.
+*          ENDIF.
+*        ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr > 0.
+*          IF komv-kschl IN lr_kschl.
+*            screen-input = lc_input_1.
+*            MODIFY SCREEN.
+*          ENDIF.
+*        ENDIF.
+*
+******************"2
+****************"3
+*        IF ls_ekko_20_ebeln IS NOT INITIAL AND ls_ekpo_20-konnr IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr = 0.
+*            screen-input = lc_input_0.
+*            MODIFY SCREEN.
+*          ENDIF.
+*        ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr = 0.
+*          screen-input = lc_input_0.
+*          MODIFY SCREEN.
+*        ENDIF.
+*
+******************"3
+*      ELSE.
+****************"6
+*        IF ls_ekko_20_ebeln IS INITIAL AND ls_eine_20 IS INITIAL.
+*          screen-input = lc_input_1.
+*          MODIFY SCREEN.
+*        ENDIF.
+*
+******************"6
+****************"4
+*        IF ls_ekko_20_ebeln IS NOT INITIAL AND ls_ekpo_20-konnr IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr > 0.
+*            IF komv-kschl IN lr_kschl.
+*              screen-input = lc_input_1.
+*              MODIFY SCREEN.
+*            ENDIF.
+*          ENDIF.
+*        ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr > 0.
+*          IF komv-kschl IN lr_kschl.
+*            screen-input = lc_input_1.
+*            MODIFY SCREEN.
+*          ENDIF.
+*        ENDIF.
+*
+******************"4
+****************"5
+*        IF ls_ekko_20_ebeln IS NOT INITIAL AND ls_ekpo_20-konnr IS NOT INITIAL.
+*          IF ls_ekpo_20-netpr = 0.
+*            screen-input = lc_input_1.
+*            MODIFY SCREEN.
+*          ENDIF.
+*        ELSEIF ls_eine_20 IS NOT INITIAL AND ls_eine_20-netpr = 0.
+*          screen-input = lc_input_1.
+*          MODIFY SCREEN.
+*        ENDIF.
+******************"5
+*      ENDIF.
+*    ENDIF.
+*  ENDIF.
+*ENDIF.
+"eoc by samim for ptp20
+
+
+
+
+
+------------------------------------------------
+
+2 *&  Include           ZI_MEPO_ITEM_COND_BLANK
+3 *&
+4 *********************************************************************
+5 *                    A D M I N I S T R A T I O N
+6 *********************************************************************
+7 *  Program ID        : ZI_MEPO_ITEM_COND_BLANK
+8 *  Version           : NA
+9 *  SAP Version       : ECC 6.0
+0 *  Program Name      : ZI_MEPO_ITEM_COND_BLANK
+1 *  Created by        : CP
+2 *  Created on        : 02.03.2018
+3 *  Description       : Change field attributes for PO Item Conditions
+4 *                      (Blank Lines)
+5 *********************************************************************
+6 *                    C H A N G E  H I S T O R Y
+7 *********************************************************************
+8 * Change Id   :                                            *
+9 * Author      :                                    *
+0 * Changed On  :                                            *
+1 * Request No  :                                            *
+2 * Description :             *
+3 *********************************************************************
+
+4 DATA: li_items_no_edit  TYPE STANDARD TABLE OF komp,
+5       l_no_editable     TYPE char1,
+6       lt_hrranges       TYPE STANDARD TABLE OF hrranges,
+7       lv_fields_no_edit TYPE char1.
+
+
+*DATA : lv_modif_flag."Samim
+*CLEAR : lv_modif_flag."Samim
+
+
+
+CLEAR: li_items_no_edit[],
+       lv_fields_no_edit,
+       l_no_editable.
+
+*CONSTANTS : lc_komv_kschl   TYPE tvarv_val VALUE 'KOMV-KSCHL', "PTP-20,
+*            lc_screen_kschl TYPE char10 VALUE 'KOMV-KSCHL'.
+
+IF komp-kposn IS INITIAL.
+* Header Conditions
+* Get Info From Enhancement Spot ZMEPO_HEADER_CUST
+  IMPORT l_no_editable FROM MEMORY ID 'ZMEPO_HEADER_CUST'.
+  IF l_no_editable IS NOT INITIAL.
+    lv_fields_no_edit = abap_true.
+  ENDIF.
+ELSE.
+* Item Conditions
+* Get Info From Enhancement Spot ZMEPO_ITEM_CUST
+  IMPORT li_items_no_edit[] FROM MEMORY ID 'ZMEPO_ITEM_CUST'.
+  READ TABLE li_items_no_edit
+  TRANSPORTING NO FIELDS
+  WITH KEY kposn = komp-kposn.
+  IF sy-subrc IS INITIAL.
+    lv_fields_no_edit = abap_true.
+  ENDIF.
+ENDIF.
+
+*DATA : lv_modif_flag."Samim
+*CLEAR : lv_modif_flag."Samim
+
+
+
+CLEAR: li_items_no_edit[],
+       lv_fields_no_edit,
+       l_no_editable.
+
+*CONSTANTS : lc_komv_kschl   TYPE tvarv_val VALUE 'KOMV-KSCHL', "PTP-20,
+*            lc_screen_kschl TYPE char10 VALUE 'KOMV-KSCHL'.
+
+IF komp-kposn IS INITIAL.
+* Header Conditions
+* Get Info From Enhancement Spot ZMEPO_HEADER_CUST
+  IMPORT l_no_editable FROM MEMORY ID 'ZMEPO_HEADER_CUST'.
+  IF l_no_editable IS NOT INITIAL.
+    lv_fields_no_edit = abap_true.
+  ENDIF.
+ELSE.
+* Item Conditions
+* Get Info From Enhancement Spot ZMEPO_ITEM_CUST
+  IMPORT li_items_no_edit[] FROM MEMORY ID 'ZMEPO_ITEM_CUST'.
+  READ TABLE li_items_no_edit
+  TRANSPORTING NO FIELDS
+  WITH KEY kposn = komp-kposn.
+  IF sy-subrc IS INITIAL.
+    lv_fields_no_edit = abap_true.
+  ENDIF.
+ENDIF.
+ ENDIF.
+
+ENDIF.
+
+
