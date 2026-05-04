@@ -1,0 +1,634 @@
+class ZCL_DATA_EXPORT_UTILITY definition
+  public
+  final
+  create public .
+
+public section.
+
+  types:
+    BEGIN OF ty_field_text,
+             col_name   TYPE lvc_fname,
+             col_text_s TYPE scrtext_s,
+             col_text_m TYPE scrtext_m,
+             col_text_l TYPE scrtext_l,
+           END OF ty_field_text .
+  types:
+    tt_field_text TYPE STANDARD TABLE OF ty_field_text WITH EMPTY KEY .
+
+  methods DISPLAY_ALV
+    importing
+      value(IR_DATA) type ref to DATA
+      !IT_FIELD_NAMES type TT_FIELD_TEXT
+    returning
+      value(RV_MESSAGE) type STRING .
+  methods DOWNLOAD_TO_LOCAL
+    importing
+      value(IR_DATA) type ref to DATA
+      value(IV_FORMAT) type STRING
+      value(IV_FILENAME) type STRING
+      !IT_FIELD_NAMES type TT_FIELD_TEXT
+    returning
+      value(RV_MESSAGE) type STRING .
+  methods WRITE_TO_AL11
+    importing
+      value(IR_DATA) type ref to DATA
+      value(IV_FORMAT) type STRING
+      value(IV_FILENAME) type STRING
+      value(IV_DIRECTORY) type STRING
+      !IT_FIELD_NAMES type TT_FIELD_TEXT optional
+      !IV_DELIMITER type CHAR1 optional
+    returning
+      value(RV_MESSAGE) type STRING .
+  methods CONVERT_TO_FORMAT
+    importing
+      value(IR_DATA) type ref to DATA
+      value(IV_FORMAT) type STRING
+      !IT_FIELD_NAMES type TT_FIELD_TEXT
+    returning
+      value(RV_CONTENT) type STRING .
+  methods SET_DATA
+    importing
+      value(IR_DATA) type ref to DATA .
+  methods GET_DATA
+    returning
+      value(RR_DATA) type ref to DATA .
+  methods SET_COLUMN_TEXT
+    importing
+      value(COLUMN_NAME) type LVC_FNAME
+      !COL_TEXT_L type SCRTEXT_L
+      !COL_TEXT_M type SCRTEXT_M
+      !COL_TEXT_S type SCRTEXT_S
+    returning
+      value(RT_FIELD_TEXT) type TT_FIELD_TEXT .
+protected section.
+private section.
+
+  class-data GR_DATA type ref to DATA .
+  data MV_DELIMITER type CHAR1 .
+ENDCLASS.
+
+
+
+CLASS ZCL_DATA_EXPORT_UTILITY IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_DATA_EXPORT_UTILITY->CONVERT_TO_FORMAT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IR_DATA                        TYPE REF TO DATA
+* | [--->] IV_FORMAT                      TYPE        STRING
+* | [--->] IT_FIELD_NAMES                 TYPE        TT_FIELD_TEXT
+* | [<-()] RV_CONTENT                     TYPE        STRING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD convert_to_format.
+
+  DATA: lv_sep TYPE c.
+
+  FIELD-SYMBOLS: <lt_table> TYPE STANDARD TABLE,
+                 <ls_row>   TYPE any,
+                 <lv_field> TYPE any.
+
+  ASSIGN ir_data->* TO <lt_table>.
+  IF sy-subrc <> 0.
+    rv_content = 'Error: Cannot assign dynamic data'.
+    RETURN.
+  ENDIF.
+
+  IF iv_format = 'CSV'.
+    IF me->mv_delimiter IS NOT INITIAL.
+     lv_sep = me->mv_delimiter.
+    ELSE.
+      lv_sep = ','.
+    ENDIF.
+  ELSEIF iv_format = 'XLS'.
+    lv_sep = cl_abap_char_utilities=>horizontal_tab.
+  ENDIF.
+
+  IF iv_format = 'CSV' OR iv_format = 'XLS'.
+    LOOP AT it_field_names INTO DATA(ls_field).
+
+      IF rv_content IS INITIAL.
+        rv_content = ls_field-col_text_l.
+      ELSE.
+        CONCATENATE rv_content ls_field-col_text_l INTO rv_content SEPARATED BY lv_sep.
+      ENDIF.
+    ENDLOOP.
+    "CONCATENATE rv_content lv_header INTO rv_content SEPARATED BY cl_abap_char_utilities=>newline.
+  ENDIF.
+
+  LOOP AT <lt_table> ASSIGNING <ls_row>.
+    " Cast to CL_ABAP_STRUCTDESCR to access GET_COMPONENTS
+    DATA(lo_structdesc) = CAST cl_abap_structdescr(
+      cl_abap_typedescr=>describe_by_data( <ls_row> )
+    ).
+    DATA(lt_components) = lo_structdesc->get_components( ).
+
+    CASE iv_format.
+      WHEN 'CSV'.
+        DATA lv_line_csv TYPE string.
+        CLEAR lv_line_csv.
+        LOOP AT lt_components INTO DATA(ls_comp_csv).
+          ASSIGN COMPONENT ls_comp_csv-name OF STRUCTURE <ls_row> TO <lv_field>.
+          IF sy-subrc = 0.
+            DATA lv_value_csv TYPE c LENGTH 255.
+            WRITE <lv_field> TO lv_value_csv LEFT-JUSTIFIED.
+            IF lv_line_csv IS INITIAL.
+              lv_line_csv = lv_value_csv.
+            ELSE.
+              CONCATENATE lv_line_csv lv_value_csv INTO lv_line_csv SEPARATED BY lv_sep.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+        IF rv_content IS INITIAL.
+          rv_content = lv_line_csv.
+        ELSE.
+          CONCATENATE rv_content lv_line_csv INTO rv_content SEPARATED BY cl_abap_char_utilities=>newline.
+        ENDIF.
+
+      WHEN 'XML'.
+        CONCATENATE rv_content '  <DocumentHeader>' cl_abap_char_utilities=>newline INTO rv_content.
+        LOOP AT lt_components INTO DATA(ls_comp_xml).
+          ASSIGN COMPONENT ls_comp_xml-name OF STRUCTURE <ls_row> TO <lv_field>.
+          IF sy-subrc = 0.
+            DATA(lv_tabix) = sy-tabix.
+            DATA lv_value_xml TYPE c LENGTH 255.
+            WRITE <lv_field> TO lv_value_xml.
+            DATA lv_tag_line TYPE string.
+
+            READ TABLE it_field_names INTO DATA(lw_fld) WITH KEY col_name = ls_comp_xml-name.
+            IF sy-subrc IS INITIAL.
+              ls_comp_xml-name = lw_fld-col_text_l.
+            ENDIF.
+            CONCATENATE '<' ls_comp_xml-name '>' lv_value_xml '</' ls_comp_xml-name '>' INTO lv_tag_line.
+            CONCATENATE rv_content lv_tag_line INTO rv_content SEPARATED BY cl_abap_char_utilities=>newline.
+            IF lv_tabix = 2.
+              CONCATENATE rv_content '  </DocumentHeader>' cl_abap_char_utilities=>newline INTO rv_content.
+              CONCATENATE rv_content '  <Message>' cl_abap_char_utilities=>newline INTO rv_content.
+              CONCATENATE rv_content '  <PalletMovement>' cl_abap_char_utilities=>newline INTO rv_content.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+        CONCATENATE rv_content '  </PalletMovement>' cl_abap_char_utilities=>newline INTO rv_content.
+        CONCATENATE rv_content '  </Message>' cl_abap_char_utilities=>newline INTO rv_content.
+
+      WHEN 'XLS'.
+        DATA lv_line_xls TYPE string.
+        CLEAR lv_line_xls.
+        LOOP AT lt_components INTO DATA(ls_comp_xls).
+          ASSIGN COMPONENT ls_comp_xls-name OF STRUCTURE <ls_row> TO <lv_field>.
+          IF sy-subrc = 0.
+            DATA lv_value_xls TYPE c LENGTH 255.
+            WRITE <lv_field> TO lv_value_xls.
+            IF lv_line_xls IS INITIAL.
+              lv_line_xls = lv_value_xls.
+            ELSE.
+              CONCATENATE lv_line_xls lv_value_xls INTO lv_line_xls SEPARATED BY cl_abap_char_utilities=>horizontal_tab.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+        IF rv_content IS INITIAL.
+          rv_content = lv_line_csv.
+        ELSE.
+          CONCATENATE rv_content lv_line_xls INTO rv_content SEPARATED BY cl_abap_char_utilities=>newline.
+        ENDIF.
+    ENDCASE.
+  ENDLOOP.
+
+  " Wrap XML if needed
+  IF iv_format = 'XML'.
+    rv_content = |<?xml version="1.0" encoding="UTF-8"?>{ cl_abap_char_utilities=>newline }<Document>{ cl_abap_char_utilities=>newline }| &&
+                 rv_content &&
+                 |</Document>|.
+  ENDIF.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_DATA_EXPORT_UTILITY->DISPLAY_ALV
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IR_DATA                        TYPE REF TO DATA
+* | [--->] IT_FIELD_NAMES                 TYPE        TT_FIELD_TEXT
+* | [<-()] RV_MESSAGE                     TYPE        STRING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD display_alv.
+
+  FIELD-SYMBOLS: <lt_table> TYPE STANDARD TABLE.
+  DATA: lo_table    TYPE REF TO cl_salv_table,
+        lo_columns  TYPE REF TO cl_salv_columns_table,
+        lo_column   TYPE REF TO cl_salv_column,
+        lv_index    TYPE lvc_fname,
+        lv_col_text TYPE scrtext_m.
+
+  ASSIGN ir_data->* TO <lt_table>.
+  IF sy-subrc <> 0.
+    rv_message = 'Error: Failed to assign dynamic data.'.
+    RETURN.
+  ENDIF.
+
+  TRY.
+      cl_salv_table=>factory(
+        IMPORTING r_salv_table = lo_table
+        CHANGING  t_table      = <lt_table> ).
+
+      lo_table->get_functions( )->set_all( abap_true ).
+      lo_table->get_display_settings( )->set_striped_pattern( abap_true ).
+      lo_table->get_columns( )->set_optimize( abap_true ).
+
+      lo_columns = lo_table->get_columns( ).
+
+      LOOP AT it_field_names INTO DATA(lw_fname).
+        TRY.
+            lo_column = lo_columns->get_column( lw_fname-col_name ).
+            lo_column->set_long_text( lw_fname-col_text_l ).
+            lo_column->set_medium_text( lw_fname-col_text_m ).
+            lo_column->set_short_text( lw_fname-col_text_s ).
+          CATCH cx_salv_not_found.
+        ENDTRY.
+      ENDLOOP.
+
+      lo_table->display( ).
+      rv_message = 'ALV displayed successfully.'.
+
+    CATCH cx_salv_msg INTO DATA(lx_msg).
+      rv_message = lx_msg->get_text( ).
+  ENDTRY.
+ENDMETHOD.
+
+*METHOD display_alv.
+*  FIELD-SYMBOLS: <lt_table> TYPE STANDARD TABLE.
+*  DATA: lo_table     TYPE REF TO cl_salv_table,
+*        lo_functions TYPE REF TO cl_salv_functions_list.
+*
+*  ASSIGN ir_data->* TO <lt_table>.
+*  IF sy-subrc <> 0.
+*    MESSAGE 'Failed to assign dynamic data' TYPE 'E'.
+*    RETURN.
+*  ENDIF.
+*
+*  TRY.
+*      " Create SALV table
+*      cl_salv_table=>factory(
+*        IMPORTING r_salv_table = lo_table
+*        CHANGING  t_table      = <lt_table> ).
+*
+*      " Enable standard functions (export, sort, filter, etc.)
+*      lo_functions = lo_table->get_functions( ).
+*      lo_functions->set_all( abap_true ).
+*
+*      " Optional: Set display settings
+*      lo_table->get_display_settings( )->set_striped_pattern( abap_true ).
+*      lo_table->get_display_settings( )->set_list_header( 'ALV Display with Toolbar' ).
+*
+*      " Optional: Set columns to auto-optimize
+*      lo_table->get_columns( )->set_optimize( abap_true ).
+*
+*      " Display ALV
+*      lo_table->display( ).
+*
+*    CATCH cx_salv_msg INTO DATA(lx_msg).
+*      MESSAGE lx_msg->get_text( ) TYPE 'E'.
+*  ENDTRY.
+*ENDMETHOD.
+*  METHOD display_alv.
+*    FIELD-SYMBOLS: <lt_table> TYPE STANDARD TABLE.
+*    DATA lo_table TYPE REF TO cl_salv_table.
+*
+*    ASSIGN ir_data->* TO <lt_table>.
+*    IF sy-subrc <> 0.
+*      MESSAGE 'Failed to assign dynamic data' TYPE 'E'.
+*      RETURN.
+*    ENDIF.
+*
+*    TRY.
+*        cl_salv_table=>factory(
+*          IMPORTING r_salv_table = lo_table
+*          CHANGING  t_table      = <lt_table> ).
+*        lo_table->display( ).
+*      CATCH cx_salv_msg INTO DATA(lx_msg).
+*        MESSAGE lx_msg->get_text( ) TYPE 'E'.
+*    ENDTRY.
+*  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_DATA_EXPORT_UTILITY->DOWNLOAD_TO_LOCAL
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IR_DATA                        TYPE REF TO DATA
+* | [--->] IV_FORMAT                      TYPE        STRING
+* | [--->] IV_FILENAME                    TYPE        STRING
+* | [--->] IT_FIELD_NAMES                 TYPE        TT_FIELD_TEXT
+* | [<-()] RV_MESSAGE                     TYPE        STRING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD download_to_local.
+
+  TYPES:
+    BEGIN OF ty_s_cline,
+      line TYPE c LENGTH 1024, " Line of type Character
+    END OF ty_s_cline .
+
+  FIELD-SYMBOLS: <lt_table> TYPE STANDARD TABLE.
+  DATA: lt_lines       TYPE STANDARD TABLE OF string,
+        lv_content     TYPE string,
+        lv_filename    TYPE string,
+        lv_path        TYPE string,
+        lv_fullpath    TYPE string,
+        lv_user_action TYPE i,
+        lv_codepage    TYPE cpcodepage,
+        lv_codepage1   TYPE abap_encoding,
+        gr_table       TYPE REF TO cl_salv_table,          " Basis Class for Simple Tables
+        lr_functions   TYPE REF TO cl_salv_functions_list, " Generic and User-Defined Functions in List-Type Tables
+        lr_layout      TYPE REF TO cl_salv_layout,         " Settings for Layout
+        lo_columns     TYPE REF TO cl_salv_columns_table,
+        lo_column      TYPE REF TO cl_salv_column,
+        lv_index       TYPE lvc_fname,
+        lv_col_text    TYPE scrtext_m,
+        lv_xml_type    TYPE salv_bs_constant,
+        lv_xml         TYPE xstring,
+        gt_srctab      TYPE STANDARD TABLE OF ty_s_cline,
+        gt_len         TYPE i,                             " Len of type Integers
+        lv_file_xlsx   TYPE string,
+        lv_file        TYPE localfile,                     " Local file for upload/download
+        ls_key         TYPE salv_s_layout_key,             " Layout Key
+        lr_content     TYPE REF TO cl_salv_form_element.   " General Element in Design Object
+
+  DATA lv_extension TYPE string.
+  lv_extension = to_lower( iv_format ). " 'csv', 'xml', 'xls'
+
+
+  ASSIGN ir_data->* TO <lt_table>.
+  IF sy-subrc <> 0.
+    MESSAGE 'Failed to assign dynamic data' TYPE 'E'.
+    RETURN.
+  ENDIF.
+
+  IF lv_extension EQ 'csv'.
+    lv_extension = 'csv'.
+  ELSEIF lv_extension EQ 'xml'.
+    lv_extension = 'xml'.
+  ELSEIF lv_extension EQ 'xls'.
+*    lv_extension = 'XLSX'.
+    iv_filename = iv_filename && '.xlsx'.
+  ENDIF.
+
+  IF lv_extension EQ 'csv' OR
+     lv_extension = 'xml'.
+    " Convert data to desired format
+    lv_content = convert_to_format( ir_data = ir_data iv_format = iv_format
+                                    it_field_names = it_field_names ).
+    SPLIT lv_content AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
+  ENDIF.
+
+  " Open Save As dialog
+  CALL METHOD cl_gui_frontend_services=>file_save_dialog
+    EXPORTING
+      window_title      = 'Save File'
+      default_extension = lv_extension
+      default_file_name = iv_filename
+    CHANGING
+      filename          = lv_filename
+      path              = lv_path
+      fullpath          = lv_fullpath
+      user_action       = lv_user_action
+    EXCEPTIONS
+      OTHERS            = 1.
+
+  " Check if user confirmed
+  IF lv_user_action = cl_gui_frontend_services=>action_cancel.
+    MESSAGE 'Download cancelled by user' TYPE 'I'.
+    RETURN.
+  ENDIF.
+*
+  IF lv_extension = 'xml'.
+    CALL FUNCTION 'SCP_CODEPAGE_BY_EXTERNAL_NAME'
+      EXPORTING
+        external_name = 'UTF-8'
+      IMPORTING
+        sap_codepage  = lv_codepage
+      EXCEPTIONS
+        not_found     = 1
+        OTHERS        = 2.
+    .
+    IF sy-subrc IS INITIAL.
+      lv_codepage1 = lv_codepage.
+      CONDENSE lv_codepage1.
+
+      " Download file to selected path
+      CALL METHOD cl_gui_frontend_services=>gui_download
+        EXPORTING
+          filename = lv_fullpath
+          filetype = 'ASC'
+          codepage = lv_codepage1
+        CHANGING
+          data_tab = lt_lines
+        EXCEPTIONS
+          OTHERS   = 1.
+    ELSE.
+      rv_message = 'Error while downlaoding XML file'.
+    ENDIF.
+
+  ELSEIF lv_extension EQ 'csv'.
+*     Download file to selected path
+    CALL METHOD cl_gui_frontend_services=>gui_download
+      EXPORTING
+        filename = lv_fullpath
+        filetype = 'ASC'
+      CHANGING
+        data_tab = lt_lines
+      EXCEPTIONS
+        OTHERS   = 1.
+
+  ENDIF.
+
+  IF iv_format EQ 'XLS'.
+    TRY.
+
+        cl_salv_table=>factory(
+          IMPORTING
+            r_salv_table = gr_table
+          CHANGING
+            t_table      = <lt_table> ).
+
+      CATCH cx_salv_msg.                                "#EC NO_HANDLER
+
+    ENDTRY.
+
+    lo_columns = gr_table->get_columns( ).
+
+    LOOP AT it_field_names INTO DATA(lw_fname).
+      TRY.
+          lo_column = lo_columns->get_column( lw_fname-col_name ).
+          lo_column->set_long_text( lw_fname-col_text_l ).
+          lo_column->set_medium_text( lw_fname-col_text_m ).
+          lo_column->set_short_text( lw_fname-col_text_s ).
+        CATCH cx_salv_not_found.
+      ENDTRY.
+    ENDLOOP.
+    lr_functions = gr_table->get_functions( ).
+
+    lr_functions->set_all( abap_true ).
+
+    lr_layout = gr_table->get_layout( ).
+
+    ls_key-report = sy-repid.
+
+    lr_layout->set_key( ls_key ).
+
+    lr_layout->set_save_restriction( if_salv_c_layout=>restrict_user_independant ).
+
+    gr_table->set_top_of_list( lr_content ).
+
+    gr_table->set_end_of_list( lr_content ).
+
+    lv_xml_type =  if_salv_bs_xml=>c_type_xlsx.
+
+    lv_xml      = gr_table->to_xml( xml_type = lv_xml_type ).
+
+    CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+      EXPORTING
+        buffer        = lv_xml
+*       APPEND_TO_TABLE       = ' '
+      IMPORTING
+        output_length = gt_len
+      TABLES
+        binary_tab    = gt_srctab.
+
+    CALL METHOD cl_gui_frontend_services=>gui_download
+      EXPORTING
+        bin_filesize            = gt_len
+        filename                = lv_fullpath
+        filetype                = 'BIN'
+      CHANGING
+        data_tab                = gt_srctab
+      EXCEPTIONS
+        file_write_error        = 1
+        no_batch                = 2
+        gui_refuse_filetransfer = 3
+        invalid_type            = 4
+        no_authority            = 5
+        unknown_error           = 6
+        header_not_allowed      = 7
+        separator_not_allowed   = 8
+        filesize_not_allowed    = 9
+        header_too_long         = 10
+        dp_error_create         = 11
+        dp_error_send           = 12
+        dp_error_write          = 13
+        unknown_dp_error        = 14
+        access_denied           = 15
+        dp_out_of_memory        = 16
+        disk_full               = 17
+        dp_timeout              = 18
+        file_not_found          = 19
+        dataprovider_exception  = 20
+        control_flush_error     = 21
+        not_supported_by_gui    = 22
+        error_no_gui            = 23
+        OTHERS                  = 24.
+
+    IF sy-subrc <> 0.
+
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                 WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+
+    ELSE. " ELSE -> IF sy-subrc <> 0
+
+      "MESSAGE 'Excel file downloaded!' TYPE 'S'.
+
+    ENDIF.
+  ENDIF.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_DATA_EXPORT_UTILITY->GET_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] RR_DATA                        TYPE REF TO DATA
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_data.
+    rr_data = gr_data.
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_DATA_EXPORT_UTILITY->SET_COLUMN_TEXT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] COLUMN_NAME                    TYPE        LVC_FNAME
+* | [--->] COL_TEXT_L                     TYPE        SCRTEXT_L
+* | [--->] COL_TEXT_M                     TYPE        SCRTEXT_M
+* | [--->] COL_TEXT_S                     TYPE        SCRTEXT_S
+* | [<-()] RT_FIELD_TEXT                  TYPE        TT_FIELD_TEXT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD set_column_text.
+    DATA: lw_field_text TYPE ty_field_text.
+
+    lw_field_text-col_name =   column_name.
+    lw_field_text-col_text_s = col_text_s.
+    lw_field_text-col_text_m = col_text_m.
+    lw_field_text-col_text_l = col_text_l.
+    APPEND lw_field_text TO rt_field_text.
+    CLEAR: lw_field_text.
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_DATA_EXPORT_UTILITY->SET_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IR_DATA                        TYPE REF TO DATA
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD set_data.
+    gr_data = ir_data.
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_DATA_EXPORT_UTILITY->WRITE_TO_AL11
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IR_DATA                        TYPE REF TO DATA
+* | [--->] IV_FORMAT                      TYPE        STRING
+* | [--->] IV_FILENAME                    TYPE        STRING
+* | [--->] IV_DIRECTORY                   TYPE        STRING
+* | [--->] IT_FIELD_NAMES                 TYPE        TT_FIELD_TEXT(optional)
+* | [--->] IV_DELIMITER                   TYPE        CHAR1(optional)
+* | [<-()] RV_MESSAGE                     TYPE        STRING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD write_to_al11.
+
+    FIELD-SYMBOLS: <lt_table> TYPE STANDARD TABLE.
+    DATA: lv_full_path TYPE string,
+          lv_content   TYPE string,
+          lt_lines     TYPE STANDARD TABLE OF string,
+          lv_line      TYPE string.
+
+    me->mv_delimiter = iv_delimiter.
+
+    ASSIGN ir_data->* TO <lt_table>.
+    IF sy-subrc <> 0.
+      MESSAGE 'Failed to assign dynamic data' TYPE 'E'.
+      RETURN.
+    ENDIF.
+
+    CASE iv_format.
+      WHEN 'CSV'. iv_filename = iv_filename && '.csv'.
+      WHEN 'XML'. iv_filename = iv_filename && '.xml'.
+      WHEN 'XLS'. iv_filename = iv_filename && '.xls'.
+    ENDCASE.
+
+    lv_full_path = |{ iv_directory }/{ iv_filename }|.
+    lv_content   = convert_to_format( ir_data = ir_data iv_format = iv_format
+                                      it_field_names = it_field_names ).
+
+    SPLIT lv_content AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
+
+    OPEN DATASET lv_full_path FOR OUTPUT IN TEXT MODE ENCODING DEFAULT.
+    IF sy-subrc = 0.
+      LOOP AT lt_lines INTO lv_line.
+        TRANSFER lv_line TO lv_full_path.
+      ENDLOOP.
+      CLOSE DATASET lv_full_path.
+    ELSE.
+      MESSAGE 'Error writing to AL11 path' TYPE 'E'.
+    ENDIF.
+
+
+  ENDMETHOD.
+ENDCLASS.
