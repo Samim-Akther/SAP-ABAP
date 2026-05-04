@@ -1,0 +1,470 @@
+***********************************************************************
+**                    A D M I N I S T R A T I O N                     *
+***********************************************************************
+**  Program ID        : ZPPIONMACHINESAPTOTRASCAR                     *
+**  Version           : 1.0                                           *
+**  SAP Version       : ECC 6.0                                       *
+**  Program Name      : ZPPIONMACHINESAPTOTRASCAR                     *
+**  Created by        :  Samim Akther                                 *
+**  Created on        : 04.11.2025                                    *
+**  Description       : Machine master data interface to TRASCAR      *
+***********************************************************************
+**                    C H A N G E  H I S T O R Y                      *
+***********************************************************************
+** Change Id   :  MANINT03                                            *
+** Author      : Samim Akther                                         *
+** Changed On  : 04.11.2025                                           *
+** Request No  : S01K936555                                           *
+** Description : Initial version, error handling, code cleanup        *
+***********************************************************************
+
+REPORT zppionmachinesaptotrascar.
+INCLUDE zppio_machinetotrascar_top.
+INCLUDE zpipo_machinetotrascar_subrtn.
+
+INITIALIZATION.
+DATA(lo_obj) = NEW machine( ).
+
+AT SELECTION-SCREEN.
+  if lo_obj is BOUND.
+  lo_obj->validation( ).
+ENDIF.
+
+START-OF-SELECTION.
+if lo_obj is BOUND.
+  lo_obj->fetch_data( ).
+  lo_obj->export_to_al11( ).
+ENDIF.
+***********************************************************************
+**                    A D M I N I S T R A T I O N                     *
+***********************************************************************
+**  Program ID        : ZPPIOMACHINESAPTOTRASCAR                  *
+**  Version           : 1.0                                           *
+**  SAP Version       : ECC                                       *
+**  Program Name      : ZPPIOMACHINESAPTOTRASCAR                  *
+**  Created by        : Akther, Samim                                 *
+**  Created on        : 04.11.2025                                    *
+**  Description       : Machine master data interface to TRASCAR       *
+***********************************************************************
+**                    C H A N G E  H I S T O R Y                      *
+***********************************************************************
+** Change Id   : 001                                                  *
+** Author      : Samim Akther                                     *
+** Changed On  : 04.11.2025                                           *
+** Request No  :                               *
+** Description : Initial version, error handling, code cleanup        *
+***********************************************************************
+*&---------------------------------------------------------------------*
+*&  Include           ZPPIO_MACHINETOTRASCAR_TOP
+*&---------------------------------------------------------------------*
+TYPES: BEGIN OF ty_machine_out,
+         machine_code        TYPE c LENGTH 2,
+         machine_serial_no   TYPE c LENGTH 10,
+         machine_position    TYPE c LENGTH 10,
+         machine_description TYPE c LENGTH 50,
+         productivity        TYPE p LENGTH 5 DECIMALS 0,
+         iud_flag            TYPE c LENGTH 1,
+       END OF ty_machine_out.
+
+CONSTANTS:lc_default_werks TYPE werks_d VALUE 'UK01',
+          lc_default_zpal  TYPE zpal VALUE '03',
+          lv_format        TYPE string VALUE 'CSV',
+          lc_a             TYPE cr_objty VALUE 'A',
+          lc_machine       TYPE string VALUE 'MACHINE',
+          lc_chrd          TYPE tabelle VALUE 'CRHD',
+          lc_zmachine      TYPE klasse_d VALUE 'ZMACHINE',
+          lc_019           TYPE klassenart VALUE '019',
+          lc_zmach_code    TYPE atnam VALUE 'ZMACH_CODE',
+          lc_progname      TYPE progname VALUE
+                                         'ZPPIO_MACHINE_SAP_TO_TRASCAR',
+          lc_name          TYPE rvari_vnam VALUE 'ZPAL_TRASCAR',
+          lc_name1         TYPE rvari_vnam VALUE 'WERKS',
+          lc_name2         TYPE rvari_vnam VALUE 'ZDELIMITER-UK01',
+          lc_progname2     TYPE progname VALUE 'ZLIIN_PRO',
+          lc_type          TYPE rsscr_kind VALUE 'S',
+          lc_msg_type(1)   TYPE c VALUE 'E',
+          lc_zrename       TYPE sxpgcolist-name VALUE 'ZRENAME',
+          lc_new_format    TYPE string VALUE '.in',
+          lc_old_format    TYPE string VALUE '.csv',
+          lc_0             TYPE char1 VALUE '0',
+          lc_1             TYPE char1 VALUE '1'.
+
+
+DATA: lt_output          TYPE TABLE OF ty_machine_out,
+      ls_output          TYPE ty_machine_out,
+      lo_manager         TYPE REF TO zcl_data_export_utility,
+      lr_data            TYPE REF TO data,
+      lv_filename        TYPE string,
+      lv_directory       TYPE string,
+      lv_werks           TYPE zlpalletizer-werks,
+      lv_zpal            TYPE zlpalletizer-zpal,
+      lt_path_range      TYPE TABLE OF hrranges,
+      lv_presult         TYPE char1,
+      lv_path            TYPE string,
+      rv_msg             TYPE string,
+      lt_allocvaluesnum  TYPE TABLE OF bapi1003_alloc_values_num,
+      lt_allocvalueschar TYPE TABLE OF bapi1003_alloc_values_char,
+      lt_allocvaluescurr TYPE TABLE OF bapi1003_alloc_values_curr,
+      lt_return          TYPE TABLE OF bapiret2,
+      lv_file_path       TYPE string,
+      lv_lvorm           TYPE crhd-lvorm.
+
+CALL FUNCTION 'ZXUN_GET_PARAMETER_YSVARV'
+  EXPORTING
+    i_progname      = lc_progname2
+    i_name          = lc_name2
+  IMPORTING
+    p_result        = lv_presult
+  EXCEPTIONS
+    wrong_type      = 1
+    wrong_value     = 2
+    inchoerent_type = 3
+    OTHERS          = 4.
+IF sy-subrc <> 0.
+  CLEAR lv_presult.
+ENDIF.
+
+TYPES: BEGIN OF ty_crhd,
+         objty TYPE crhd-objty,
+         objid TYPE crhd-objid,
+         arbpl TYPE crhd-arbpl,
+         stand TYPE crhd-stand,
+         werks TYPE crhd-werks,
+         lvorm TYPE crhd-lvorm,
+       END OF ty_crhd.
+
+DATA: lt_crhd TYPE STANDARD TABLE OF ty_crhd WITH EMPTY KEY.
+
+
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME.
+
+SELECT-OPTIONS:
+               s_werks FOR lv_werks OBLIGATORY DEFAULT lc_default_werks,
+               s_zpal  FOR lv_zpal  OBLIGATORY DEFAULT lc_default_zpal,
+               s_lvorm FOR lv_lvorm.
+SELECTION-SCREEN END OF BLOCK b1.
+
+***********************************************************************
+**                    A D M I N I S T R A T I O N                     *
+***********************************************************************
+**  Program ID        : ZPPIOMACHINESAPTOTRASCAR                  *
+**  Version           : 1.0                                           *
+**  SAP Version       : ECC                                       *
+**  Program Name      : ZPPIOMACHINESAPTOTRASCAR                  *
+**  Created by        : Akther, Samim                                 *
+**  Created on        : 04.11.2025                                    *
+**  Description       : Machine master data interface to TRASCAR       *
+***********************************************************************
+**                    C H A N G E  H I S T O R Y                      *
+***********************************************************************
+** Change Id   : 001                                                  *
+** Author      : Samim Akther                                     *
+** Changed On  : 04.11.2025                                           *
+** Request No  :                               *
+** Description : Initial version, error handling, code cleanup        *
+***********************************************************************
+*&---------------------------------------------------------------------*
+*&  Include           ZPIPO_MACHINETOTRASCAR_SUBRTN
+*&---------------------------------------------------------------------*
+CLASS machine DEFINITION.
+  PUBLIC SECTION.
+    METHODS: fetch_data,
+      export_to_al11,
+      validation,
+      change_extension IMPORTING iv_path    TYPE string
+                                 iv_old_ext TYPE string
+                                 iv_new_ext TYPE string.
+ENDCLASS.
+
+CLASS machine IMPLEMENTATION.
+  METHOD fetch_data.
+    CLEAR: lt_output, ls_output.
+
+    " Get Work Centers from ZVC_LPALLETIZER
+
+    SELECT werks,arbpl,zpal
+           INTO TABLE @DATA(lt_zlpalletizer) FROM zlpalletizer
+                     WHERE werks IN @s_werks
+                     AND zpal  IN @s_zpal.
+
+    IF lt_zlpalletizer IS NOT INITIAL.
+      SORT lt_zlpalletizer BY werks arbpl zpal.
+    ELSE.
+      MESSAGE text-002 TYPE lc_msg_type.
+    ENDIF.
+    IF lt_zlpalletizer IS NOT INITIAL.
+
+      "Get Work Center Header Info from CRHD
+      IF s_lvorm[] IS INITIAL.
+        SELECT objty,objid,arbpl,stand,werks,lvorm
+          INTO TABLE @lt_crhd
+          FROM crhd
+          FOR ALL ENTRIES IN @lt_zlpalletizer
+          WHERE objty = @lc_a
+            AND arbpl = @lt_zlpalletizer-arbpl
+            AND werks = @lt_zlpalletizer-werks.
+      ELSE.
+        SELECT objty,objid,arbpl,stand,werks,lvorm
+          INTO TABLE @lt_crhd
+          FROM crhd
+          FOR ALL ENTRIES IN @lt_zlpalletizer
+          WHERE objty = @lc_a
+            AND arbpl = @lt_zlpalletizer-arbpl
+            AND werks = @lt_zlpalletizer-werks
+            AND lvorm IN @s_lvorm.
+      ENDIF.
+
+
+
+      IF sy-subrc = 0 AND lt_crhd IS NOT INITIAL.
+        "Get Productivity
+        SELECT werks, arbpl, zstd_speed
+                 INTO TABLE @DATA(lt_zpp_wrk_oee) FROM zpp_wrk_oee
+                            FOR ALL ENTRIES IN @lt_crhd
+                            WHERE werks = @lt_crhd-werks
+                            AND arbpl = @lt_crhd-arbpl.
+
+        " Get Work Center Texts from CRTX using OBJID
+        SELECT objty,objid,spras,ktext
+          INTO TABLE @DATA(lt_crtx)
+          FROM crtx
+          FOR ALL ENTRIES IN @lt_crhd
+          WHERE objty = @lt_crhd-objty
+           AND objid = @lt_crhd-objid
+           AND spras = @sy-langu.
+
+      ENDIF.
+
+      SORT: lt_zpp_wrk_oee BY werks arbpl,
+             lt_crtx        BY objid.
+
+      LOOP AT lt_crhd INTO DATA(ls_crhd).
+        READ TABLE lt_zpp_wrk_oee INTO DATA(ls_oee)
+         WITH KEY werks = ls_crhd-werks arbpl = ls_crhd-arbpl
+           BINARY SEARCH.
+
+        IF sy-subrc = 0.
+          REFRESH: lt_allocvaluesnum,
+                   lt_allocvalueschar,
+                   lt_allocvaluescurr,
+                   lt_return.
+
+
+          DATA(lv_objkey) = CONV objnum( |{ ls_crhd-werks }{ ls_crhd-arbpl }| ).
+
+
+          CALL FUNCTION 'BAPI_OBJCL_GETDETAIL'
+            EXPORTING
+              objectkey       = lv_objkey
+              objecttable     = lc_chrd
+              classnum        = lc_zmachine
+              classtype       = lc_019
+            TABLES
+              allocvaluesnum  = lt_allocvaluesnum
+              allocvalueschar = lt_allocvalueschar
+              allocvaluescurr = lt_allocvaluescurr
+              return          = lt_return.
+
+
+          READ TABLE lt_allocvalueschar INTO DATA(ls_allocvalueschar)
+           WITH KEY charact = lc_zmach_code.
+
+          IF  ls_allocvalueschar IS NOT INITIAL.
+
+            CLEAR ls_output.
+
+            READ TABLE lt_crtx INTO DATA(ls_crtx)
+               WITH KEY objid = ls_crhd-objid BINARY SEARCH.
+
+            IF ls_crtx IS NOT INITIAL.
+              ls_output-machine_description = ls_crtx-ktext.
+            ELSE.
+              ls_output-machine_description = space.
+            ENDIF.
+
+
+            ls_output-machine_code  = ls_allocvalueschar-value_char.
+            ls_output-machine_serial_no   = ls_crhd-arbpl.
+            ls_output-machine_position    = ls_crhd-stand.
+            ls_output-machine_description = ls_crtx-ktext.
+            ls_output-productivity        = ls_oee-zstd_speed.
+
+            IF ls_crhd-lvorm IS INITIAL.
+              ls_output-iud_flag            = lc_0.
+            ELSE.
+              ls_output-iud_flag            = lc_1.
+            ENDIF.
+            APPEND ls_output TO lt_output.
+            CLEAR : ls_output.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+
+    IF lt_output IS INITIAL.
+      MESSAGE text-005 TYPE lc_msg_type.
+      RETURN.
+    ENDIF.
+
+
+    CLEAR: lv_objkey, ls_crhd, ls_oee, ls_crtx.
+  ENDMETHOD.
+
+  METHOD export_to_al11.
+    CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+      EXPORTING
+        i_progname      = lc_progname
+        i_name          = lc_name
+        i_type          = lc_type
+      TABLES
+        it_hrranges     = lt_path_range
+      EXCEPTIONS
+        wrong_type      = 1
+        wrong_value     = 2
+        inchoerent_type = 3
+        OTHERS          = 4.
+    IF sy-subrc <> 0.
+
+      MESSAGE text-003  TYPE lc_msg_type.
+
+    ENDIF.
+
+
+
+    READ TABLE lt_path_range INTO DATA(ls_path_range) INDEX 1.
+    IF sy-subrc <> 0 OR ls_path_range-low IS INITIAL.
+      MESSAGE text-003 TYPE lc_msg_type.
+      RETURN.
+    ENDIF.
+    lv_path = |{ ls_path_range-low }{ ls_path_range-high }|.
+
+
+    lo_manager = NEW zcl_data_export_utility( ).
+    lv_filename = lc_machine && sy-datum && sy-uzeit.
+
+    lv_directory = lv_path.
+
+    CREATE DATA lr_data TYPE TABLE OF ty_machine_out.
+    ASSIGN lr_data->* TO FIELD-SYMBOL(<lt_data>).
+    <lt_data> = lt_output.
+
+    CALL METHOD lo_manager->write_to_al11
+      EXPORTING
+        ir_data      = lr_data
+        iv_format    = lv_format
+        iv_filename  = lv_filename
+        iv_directory = lv_directory
+        iv_delimiter = lv_presult
+      RECEIVING
+        rv_message   = rv_msg.
+
+    IF rv_msg IS NOT INITIAL.
+      MESSAGE rv_msg TYPE lc_msg_type.
+    ELSE.
+      MESSAGE text-006 TYPE lc_type.
+    ENDIF.
+
+    lv_file_path = lv_path && '/' && lv_filename && lc_old_format.
+
+    change_extension( iv_path = lv_file_path iv_old_ext = lc_old_format iv_new_ext = lc_new_format ).
+
+    UNASSIGN <lt_data>.
+    CLEAR : lr_data, lv_filename, lv_directory.
+  ENDMETHOD.
+  METHOD validation.
+    CLEAR : lt_path_range[].
+    CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+      EXPORTING
+        i_progname      = lc_progname
+        i_name          = lc_name1
+        i_type          = lc_type
+      TABLES
+        it_hrranges     = lt_path_range
+      EXCEPTIONS
+        wrong_type      = 1
+        wrong_value     = 2
+        inchoerent_type = 3
+        OTHERS          = 4.
+    IF sy-subrc <> 0.
+      MESSAGE text-004 TYPE lc_msg_type.
+      RETURN.
+    ENDIF.
+
+    IF s_werks[] IS NOT INITIAL.
+      LOOP AT s_werks[] ASSIGNING FIELD-SYMBOL(<fs_werks>).
+        IF <fs_werks>-low NOT IN lt_path_range.
+
+          MESSAGE  e465(zc_ftd_pp)  WITH <fs_werks>-low.
+
+        ENDIF.
+
+        IF <fs_werks>-high IS NOT INITIAL.
+          IF <fs_werks>-high NOT IN lt_path_range.
+            MESSAGE  e465(zc_ftd_pp)  WITH <fs_werks>-low.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      UNASSIGN : <fs_werks>.
+    ENDIF.
+
+    CLEAR : lt_path_range[].
+
+    IF s_zpal[] IS NOT INITIAL.
+      LOOP AT s_zpal[] ASSIGNING FIELD-SYMBOL(<fs_zpal>).
+        IF <fs_zpal>-low <> lc_default_zpal.
+          MESSAGE text-001 TYPE lc_msg_type.
+        ENDIF.
+
+        IF <fs_zpal>-high IS NOT INITIAL.
+          IF <fs_zpal>-high <> lc_default_zpal.
+            MESSAGE text-001 TYPE lc_msg_type.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      UNASSIGN: <fs_zpal>.
+    ENDIF.
+  ENDMETHOD.
+  METHOD change_extension.
+
+    DATA: lv_path_new   TYPE string,
+          lv_command    TYPE sxpgcolist-name VALUE lc_zrename,
+          lv_parameters TYPE sxpgcolist-parameters.
+
+    " Replace old extension with new extension
+    lv_path_new = iv_path.
+
+    REPLACE iv_old_ext WITH iv_new_ext INTO lv_path_new.
+
+    " Build parameters for the OS command (source and target file)
+    CONCATENATE iv_path lv_path_new INTO lv_parameters SEPARATED BY space.
+
+    " Execute OS command to rename the file
+    CALL FUNCTION 'SXPG_COMMAND_EXECUTE'
+      EXPORTING
+        commandname                   = lv_command
+        additional_parameters         = lv_parameters
+      EXCEPTIONS
+        no_permission                 = 1
+        command_not_found             = 2
+        parameters_too_long           = 3
+        security_risk                 = 4
+        wrong_check_call_interface    = 5
+        program_start_error           = 6
+        program_termination_error     = 7
+        x_error                       = 8
+        parameter_expected            = 9
+        too_many_parameters           = 10
+        illegal_command               = 11
+        wrong_asynchronous_parameters = 12
+        cant_enq_tbtco_entry          = 13
+        jobcount_generation_error     = 14
+        OTHERS                        = 15.
+    IF sy-subrc <> 0.
+      MESSAGE text-008 TYPE lc_msg_type.
+    ENDIF.
+
+    CLEAR :lv_path_new ,lv_command,lv_parameters.
+  ENDMETHOD.
+ENDCLASS.
