@@ -1,0 +1,1486 @@
+i have created a report .
+here i have some conditon types that will be mentioned int the tvrvc table 
+and auto it will fetch in the selection screen 
+many tables will be the there for a single condition types so
+added some dynamic select for that and then filtered the data 
+and then added the code for email send for email i have created a class.
+REPORT zvrnsendexppricelist.
+
+INCLUDE zvrnsendexppricelist_top.   " Types, constants, globals
+INCLUDE zvrnsendexppricelist_sel.   " Selection screen + PBO/PAI
+INCLUDE zvrnsendexppricelist_forms.   " All FORM routines
+
+START-OF-SELECTION.
+
+IF r_pl = gc_x.
+    PERFORM run_pricelist.
+  ELSEIF r_p2 = gc_x.
+    PERFORM run_quotation.
+  ELSE.
+    MESSAGE text-030 TYPE lc_type_i.
+  ENDIF.
+
+*INCLUDE zvrnsendexppricelist_statuso02.
+*
+*INCLUDE zvrnsendexppricelist_user_ci01.
+
+*&---------------------------------------------------------------------*
+*&  Include           ZVRNSENDEXPPRICELIST_TOP
+*&---------------------------------------------------------------------
+
+"----------------- Types -----------------
+TYPES: BEGIN OF ty_kschl,
+         kschl TYPE t685-kschl,
+       END OF ty_kschl.
+
+TYPES: BEGIN OF ty_pricelist,
+         kschl     TYPE kschl,
+         knumh     TYPE knumh,
+         datbi     TYPE datbi,
+         days_left TYPE i,
+         key_desc  TYPE string,
+         key_combo TYPE string,
+         vkorg     TYPE vkorg,
+         vtweg     TYPE vtweg,
+         spart     TYPE spart,
+         kunnr     TYPE kunnr,
+         kunag     TYPE kunag,
+         kunwe     TYPE kunwe,
+         zzkunzf   TYPE zkunzf,
+         inco1     TYPE inco1,
+         vsbed     TYPE vsbed,
+         matnr     TYPE matnr,
+         zzpmatn   TYPE pmatn,
+       END OF ty_pricelist.
+
+TYPES: BEGIN OF ty_quote,
+         auart     TYPE vbak-auart,
+         vbeln     TYPE vbak-vbeln,
+         posnr     TYPE posnr,
+         vkorg     TYPE vbak-vkorg,
+         days_left TYPE i,
+         kunnr     TYPE vbak-kunnr,
+         name1     TYPE kna1-name1,
+         matnr     TYPE matnr,
+         maktx     TYPE makt-maktx,
+         angdt     TYPE vbak-angdt,
+         bnddt     TYPE vbak-bnddt,   " Valid To
+
+       END OF ty_quote.
+
+"----------------- Constants -----------------
+CONSTANTS: lc_vbtyp_quote TYPE vbak-vbtyp VALUE 'B',
+           lc_type_e      TYPE string VALUE 'E',
+           lc_type_i      TYPE string VALUE 'I',
+           lc_type_s      TYPE string VALUE 'S'.
+
+"----------------- Global Data -----------------
+DATA:          lt_kschl     TYPE SORTED TABLE OF ty_kschl WITH UNIQUE KEY kschl,
+               lv_zzpmatn   TYPE mvke-pmatn,
+               lv_kunag     TYPE vbrk-kunag,
+               lt_skschl    TYPE TABLE OF hrranges,
+               lt_sauart    TYPE TABLE OF hrranges,
+               lt_qstat     TYPE TABLE OF hrranges,
+               lt_condmax   TYPE TABLE OF hrranges,
+               lv_date_from TYPE sy-datum,
+               lv_date_to   TYPE sy-datum,
+               lv_q_from    TYPE sy-datum,
+               lv_q_to      TYPE sy-datum,
+               lv_group_key TYPE string.
+
+" Email helper globals
+DATA: lo_send_request    TYPE REF TO cl_bcs,
+      lo_document        TYPE REF TO cl_document_bcs,
+      lo_receiver        TYPE REF TO cl_cam_address_bcs,
+      lv_subject         TYPE so_obj_des,
+      lt_body            TYPE soli_tab,
+      lv_line            TYPE soli,
+      lv_email           TYPE adr6-smtp_addr,
+      lt_emails          TYPE STANDARD TABLE OF string,
+      lv_string          TYPE string,
+      lv_datbi_formatted TYPE char10,
+      lv_email_sub       TYPE so_obj_des.
+
+" Working sets
+DATA: lt_pricelists TYPE STANDARD TABLE OF ty_pricelist,
+      ls_pricelist  TYPE ty_pricelist,
+      lt_quotes     TYPE STANDARD TABLE OF ty_quote,
+      ls_quote      TYPE ty_quote,
+      lt_body2      TYPE soli_tab,
+      lv_line2      TYPE soli,
+      lv_subject2   TYPE so_obj_des.
+
+TYPES ty_t_pricelist TYPE STANDARD TABLE OF ty_pricelist WITH DEFAULT KEY.
+
+
+*DATA: ls_pricelist TYPE ty_pricelist.
+FIELD-SYMBOLS: <dyn_table> TYPE STANDARD TABLE,
+               <dyn_line>  TYPE any.
+
+DATA lo_data TYPE REF TO data.
+DATA: lt_dfies     TYPE STANDARD TABLE OF dfies,
+      lv_has_datbi TYPE abap_bool,
+      lv_tabname2  TYPE ddobjname.
+
+DATA lt_knumh TYPE TABLE OF konp-knumh.
+TYPES: BEGIN OF ty_gstru,
+         gstru TYPE tmc1t-gstru,
+       END OF ty_gstru.
+
+DATA: lt_gstru TYPE STANDARD TABLE OF ty_gstru WITH EMPTY KEY,
+      lt_tmc1t TYPE SORTED   TABLE OF tmc1t
+                 WITH UNIQUE KEY spras gstru.
+DATA: lt_knumh_final TYPE SORTED TABLE OF konp-knumh
+                    WITH UNIQUE KEY table_line.
+
+
+TYPES: BEGIN OF ty_vkorg_text,
+         vkorg TYPE tvkot-vkorg,
+         vtext TYPE tvkot-vtext,
+       END OF ty_vkorg_text.
+
+DATA: lt_tvkot         TYPE STANDARD TABLE OF ty_vkorg_text WITH EMPTY KEY, "All VKORGs (lang)
+      lt_selected      TYPE STANDARD TABLE OF ty_vkorg_text WITH EMPTY KEY, "Selected VKORGs
+      ls_row           TYPE ty_vkorg_text,
+      lv_subject_vtext TYPE string.
+
+DATA: lt_pricelists_clean TYPE STANDARD TABLE OF ty_pricelist
+                                 WITH EMPTY KEY,
+      ls_pricelist_clean  TYPE ty_pricelist.
+TYPES: BEGIN OF ty_konp_final,
+         knumh    TYPE konp-knumh,
+         kschl    TYPE konp-kschl,
+         loevm_ko TYPE konp-loevm_ko,
+       END OF ty_konp_final.
+
+DATA lt_konp_final TYPE STANDARD TABLE OF ty_konp_final WITH EMPTY KEY.
+
+CONSTANTS : gc_onli TYPE sy-ucomm VALUE 'ONLI'.
+CONSTANTS : gc_rep TYPE screen-group1 VALUE 'REP'.
+CONSTANTS : gc_req TYPE screen-group1 VALUE 'REQ'.
+
+DATA : gvkorg TYPE vbak-vkorg,
+       gkschl TYPE t685-kschl,
+       gmatnr TYPE mara-matnr,
+       gauart TYPE vbak-auart.
+
+"Signs/options (selection)
+CONSTANTS:
+  gc_sign_i TYPE sign VALUE 'I',
+  gc_opt_eq TYPE option VALUE 'EQ',
+  gc_x      TYPE char1 VALUE 'X'.
+
+"Field names (dynamic ASSIGNs)
+CONSTANTS:
+  "Condition / Validity fields
+  gc_fld_kschl   TYPE fieldname VALUE 'KSCHL',
+  gc_fld_datbi   TYPE fieldname VALUE 'DATBI',
+  gc_fld_knumh   TYPE fieldname VALUE 'KNUMH',
+
+  "Customer / partner related
+  gc_fld_kunnr   TYPE fieldname VALUE 'KUNNR',
+  gc_fld_kunag   TYPE fieldname VALUE 'KUNAG',
+  gc_fld_kunwe   TYPE fieldname VALUE 'KUNWE',
+  gc_fld_zzkunzf TYPE fieldname VALUE 'ZZKUNZF',
+
+  "Material related
+  gc_fld_matnr   TYPE fieldname VALUE 'MATNR',
+  gc_fld_zzpmatn TYPE fieldname VALUE 'ZZPMATN',
+
+  "Sales org structure
+  gc_fld_vkorg   TYPE fieldname VALUE 'VKORG',
+  gc_fld_vtweg   TYPE fieldname VALUE 'VTWEG',
+  gc_fld_spart   TYPE fieldname VALUE 'SPART',
+
+  "Logistics / Incoterms
+  gc_fld_inco1   TYPE fieldname VALUE 'INCO1',
+  gc_fld_vsbed   TYPE fieldname VALUE 'VSBED'.
+
+
+"Email
+CONSTANTS:
+  gc_doc_raw  TYPE so_obj_tp VALUE 'RAW',
+  gc_delim_sc TYPE char1 VALUE ';'.
+
+
+CONSTANTS:  gc_zvrnsendexppricelist TYPE progname VALUE 'ZVRNSENDEXPPRICELIST',
+            gc_zsendprlst           TYPE rvari_vnam VALUE 'ZSENDPRLST',
+            gc_zsendquot            TYPE rvari_vnam VALUE 'ZSENDQUOT',
+            gc_zquotstat            TYPE rvari_vnam VALUE 'ZQUOTSTAT',
+            gc_zcond_max            TYPE rvari_vnam VALUE 'ZCOND_MAX',
+            gc_s                    TYPE rsscr_kind VALUE 'S'.
+
+*--------------------------------------------------------------------*
+* Constants for SALV column names + lengths (NO hardcode in code)
+*--------------------------------------------------------------------*
+CONSTANTS:
+  "SALV column names
+  gc_col_vkorg     TYPE lvc_fname VALUE 'VKORG',
+  gc_col_kschl     TYPE lvc_fname VALUE 'KSCHL',
+  gc_col_days_left TYPE lvc_fname VALUE 'DAYS_LEFT',
+  gc_col_key_desc  TYPE lvc_fname VALUE 'KEY_DESC',
+  gc_col_datbi     TYPE lvc_fname VALUE 'DATBI',
+  gc_col_key_combo TYPE lvc_fname VALUE 'KEY_COMBO',
+*  gc_col_key_combo TYPE char200 VALUE 'KEY_COMBO',
+  gc_col_datum     TYPE lvc_fname VALUE 'DATUM',
+  gc_col_knumh     TYPE lvc_fname VALUE 'KNUMH',
+  gc_col_vtweg     TYPE lvc_fname VALUE 'VTWEG',
+  gc_col_spart     TYPE lvc_fname VALUE 'SPART',
+  gc_col_kunnr     TYPE lvc_fname VALUE 'KUNNR',
+  gc_col_kunag     TYPE lvc_fname VALUE 'KUNAG',
+  gc_col_kunwe     TYPE lvc_fname VALUE 'KUNWE',
+  gc_col_zzkunzf   TYPE lvc_fname VALUE 'ZZKUNZF',
+  gc_col_inco1     TYPE lvc_fname VALUE 'INCO1',
+  gc_col_vsbed     TYPE lvc_fname VALUE 'VSBED',
+  gc_col_matnr     TYPE lvc_fname VALUE 'MATNR',
+  gc_col_zzpmatn   TYPE lvc_fname VALUE 'ZZPMATN',
+
+  "Output lengths (also no hardcode)
+  gc_len_key_combo TYPE lvc_outlen VALUE 75,
+  gc_len_key_desc  TYPE lvc_outlen VALUE 45.
+
+
+CONSTANTS:
+  gc_col_auart TYPE lvc_fname VALUE 'AUART',
+  gc_col_vbeln TYPE lvc_fname VALUE 'VBELN',
+  gc_col_posnr TYPE lvc_fname VALUE 'POSNR',
+  gc_col_name1 TYPE lvc_fname VALUE 'NAME1',
+  gc_col_maktx TYPE lvc_fname VALUE 'MAKTX',
+  gc_col_angdt TYPE lvc_fname VALUE 'ANGDT',
+  gc_col_bnddt TYPE lvc_fname VALUE 'BNDDT'.
+
+
+CONSTANTS: lc_max_date TYPE sy-datum VALUE '99991231'.
+
+DATA: lv_max_days TYPE i.
+
+TYPES: BEGIN OF ty_vkorg_text_q,
+         vkorg TYPE tvkot-vkorg,
+         vtext TYPE tvkot-vtext,
+       END OF ty_vkorg_text_q.
+
+DATA: lt_tvkot_q         TYPE STANDARD TABLE OF ty_vkorg_text_q WITH EMPTY KEY,
+      ls_row_q           TYPE ty_vkorg_text_q,
+      lv_subject_vtext_q TYPE string.
+DATA: lo_alv TYPE REF TO cl_salv_table.
+DATA :lo_alv_q  TYPE REF TO cl_salv_table.
+
+CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+  EXPORTING
+    i_progname      = gc_zvrnsendexppricelist
+    i_name          = gc_zquotstat
+    i_type          = gc_s
+  TABLES
+    it_hrranges     = lt_qstat
+  EXCEPTIONS
+    wrong_type      = 1
+    wrong_value     = 2
+    inchoerent_type = 3
+    OTHERS          = 4.
+
+IF sy-subrc = 0.
+  SORT lt_qstat BY low.
+ENDIF.
+
+*DATA: o_cont TYPE REF TO cl_gui_custom_container,
+*      o_grid TYPE REF TO cl_gui_alv_grid,
+*      gs_fcat  TYPE lvc_s_fcat,
+*      gt_fcat  TYPE lvc_t_fcat,
+*      gs_layo  TYPE lvc_s_layo.
+
+TYPE-POOLS: slis.
+
+DATA: gt_fieldcat TYPE slis_t_fieldcat_alv,
+      gs_fieldcat TYPE slis_fieldcat_alv,
+      gs_layout TYPE slis_layout_alv.
+
+      *&---------------------------------------------------------------------*
+*&  Include           ZVRNSENDEXPPRICELIST_SEL
+*&---------------------------------------------------------------------*
+
+*====================================================================*
+*  Selection Screen Include: ZVRNSENDEXPPRICELIST_SEL
+*  Purpose                 : All parameters, selects, PBO/PAI, INIT
+*====================================================================*
+"----------------- Selection Options -----------------
+SELECT-OPTIONS: s_vkorg FOR gvkorg OBLIGATORY.
+
+SELECTION-SCREEN BEGIN OF BLOCK b0 WITH FRAME.
+
+*PARAMETERS: r_pl RADIOBUTTON GROUP g1 DEFAULT 'X' USER-COMMAND r1.
+PARAMETERS: r_pl RADIOBUTTON GROUP g1  USER-COMMAND r1.
+SELECT-OPTIONS: s_kschl FOR gkschl MODIF ID rep.
+PARAMETERS:     p_days  TYPE i MODIF ID rep.
+SELECT-OPTIONS: s_zzpmat FOR lv_zzpmatn MODIF ID rep,
+                s_matnr  FOR gmatnr MODIF ID rep,
+                s_kunnr  FOR lv_kunag MODIF ID rep.
+PARAMETERS:     p_email  TYPE string MODIF ID rep,
+                p_eml_cc TYPE string MODIF ID rep.
+
+PARAMETERS: r_p2 RADIOBUTTON GROUP g1.
+SELECT-OPTIONS: s_auart FOR gauart MODIF ID req.
+PARAMETERS:     p_day_q  TYPE i MODIF ID req.
+SELECT-OPTIONS: s_mat_q FOR gmatnr MODIF ID req,
+                s_kunr_q FOR lv_kunag MODIF ID req.
+PARAMETERS:     p_email2 TYPE string MODIF ID req,
+                p_em2_cc TYPE string MODIF ID req.
+
+SELECTION-SCREEN END OF BLOCK b0.
+
+PARAMETERS: p_rep AS CHECKBOX.
+
+"----------------- PBO: Toggle Fields -----------------
+
+AT SELECTION-SCREEN OUTPUT.
+  LOOP AT SCREEN.
+    IF screen-group1 = gc_rep.
+      screen-active = COND i( WHEN r_pl = gc_x THEN 1 ELSE 0 ).
+      MODIFY SCREEN.
+    ENDIF.
+    IF screen-group1 = gc_req.
+      screen-active = COND i( WHEN r_p2 = gc_x THEN 1 ELSE 0 ).
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.
+
+  "----------------- PAI: Validations -----------------
+
+AT SELECTION-SCREEN.
+
+
+  """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+  "--------------------------------------------------
+  " Validate Sales Org against TVKO
+  "--------------------------------------------------
+  SELECT vkorg
+    FROM tvko
+    INTO TABLE @DATA(lt_tvko)
+    WHERE vkorg IN @s_vkorg.
+
+  LOOP AT s_vkorg INTO DATA(ls_vkorg).
+    IF ls_vkorg-low IS NOT INITIAL.
+      READ TABLE lt_tvko WITH KEY vkorg = ls_vkorg-low TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        MESSAGE text-033 TYPE lc_type_e.
+      ENDIF.
+    ENDIF.
+
+    IF ls_vkorg-high IS NOT INITIAL.
+      READ TABLE lt_tvko WITH KEY vkorg = ls_vkorg-high TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        MESSAGE text-033 TYPE lc_type_e.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+
+  "--------------------------------------------------
+  " Validate Material (Price List) against MARA
+  "--------------------------------------------------
+  IF r_pl = abap_true AND s_matnr[] IS NOT INITIAL.
+    SELECT matnr
+      FROM mara
+      INTO TABLE @DATA(lt_mara_pl)
+      WHERE matnr IN @s_matnr.
+
+    LOOP AT s_matnr INTO DATA(ls_matnr_pl).
+      IF ls_matnr_pl-low IS NOT INITIAL.
+        READ TABLE lt_mara_pl WITH KEY matnr = ls_matnr_pl-low TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-034 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+
+      IF ls_matnr_pl-high IS NOT INITIAL.
+        READ TABLE lt_mara_pl WITH KEY matnr = ls_matnr_pl-high TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-034 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+
+  "--------------------------------------------------
+  " Validate Sold-to (Price List) against KNA1
+  "--------------------------------------------------
+  IF r_pl = abap_true AND s_kunnr[] IS NOT INITIAL.
+    SELECT kunnr
+      FROM kna1
+      INTO TABLE @DATA(lt_kna1_pl)
+      WHERE kunnr IN @s_kunnr.
+
+    LOOP AT s_kunnr INTO DATA(ls_kun_pl).
+      IF ls_kun_pl-low IS NOT INITIAL.
+        READ TABLE lt_kna1_pl WITH KEY kunnr = ls_kun_pl-low TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-035 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+
+      IF ls_kun_pl-high IS NOT INITIAL.
+        READ TABLE lt_kna1_pl WITH KEY kunnr = ls_kun_pl-high TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-035 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  " Validate ref material (Price List) against mvke
+
+  IF r_pl = abap_true AND s_zzpmat[] IS NOT INITIAL.
+    SELECT pmatn
+      FROM mvke
+      INTO TABLE @DATA(lt_mvke_pl)
+      WHERE pmatn IN @s_zzpmat.
+
+    LOOP AT s_zzpmat INTO DATA(ls_mvke_pl).
+      IF ls_mvke_pl-low IS NOT INITIAL.
+        READ TABLE lt_mvke_pl WITH KEY pmatn = ls_mvke_pl-low TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-065 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+
+      IF ls_mvke_pl-high IS NOT INITIAL.
+        READ TABLE lt_mvke_pl WITH KEY pmatn = ls_mvke_pl-high TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-065 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+
+  "--------------------------------------------------
+  " Validate Material (Quotation) against MARA
+  "--------------------------------------------------
+  IF r_p2 = abap_true AND s_mat_q[] IS NOT INITIAL.
+    SELECT matnr
+      FROM mara
+      INTO TABLE @DATA(lt_mara_q)
+      WHERE matnr IN @s_mat_q.
+
+    LOOP AT s_mat_q INTO DATA(ls_mat_q).
+      IF ls_mat_q-low IS NOT INITIAL.
+        READ TABLE lt_mara_q WITH KEY matnr = ls_mat_q-low TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-034 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+
+      IF ls_mat_q-high IS NOT INITIAL.
+        READ TABLE lt_mara_q WITH KEY matnr = ls_mat_q-high TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-034 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  "--------------------------------------------------
+  " Validate Sold-to (Quotation) against KNA1
+  "--------------------------------------------------
+  IF r_p2 = abap_true AND s_kunr_q[] IS NOT INITIAL.
+    SELECT kunnr
+      FROM kna1
+      INTO TABLE @DATA(lt_kna1_q)
+      WHERE kunnr IN @s_kunr_q.
+
+    LOOP AT s_kunr_q INTO DATA(ls_kun_q).
+      IF ls_kun_q-low IS NOT INITIAL.
+        READ TABLE lt_kna1_q WITH KEY kunnr = ls_kun_q-low TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-035 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+
+      IF ls_kun_q-high IS NOT INITIAL.
+        READ TABLE lt_kna1_q WITH KEY kunnr = ls_kun_q-high TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          MESSAGE text-035 TYPE lc_type_e.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  IF sy-ucomm <> gc_onli.
+    RETURN.
+  ENDIF.
+
+*  IF p_rep = abap_true.
+*    IF r_pl = abap_true.
+*      DATA(lv_cnt_kschl) = 0.
+*      CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+*        EXPORTING
+*          i_progname      = gc_zvrnsendexppricelist
+*          i_name          = gc_zcond_max
+*          i_type          = gc_s
+*        TABLES
+*          it_hrranges     = lt_condmax
+*        EXCEPTIONS
+*          wrong_type      = 1
+*          wrong_value     = 2
+*          inchoerent_type = 3
+*          OTHERS          = 4.
+*
+*      IF sy-subrc = 0.
+*        SORT lt_condmax BY low.
+*      ENDIF.
+*
+*      lv_cnt_kschl = lines( s_kschl ).
+*      DATA(lv_condmax)  = VALUE #( lt_condmax[ 1 ]-low OPTIONAL ).
+*      IF lv_cnt_kschl > lv_condmax.
+*        MESSAGE text-037 TYPE lc_type_e.
+*      ENDIF.
+*    ENDIF.
+*  ENDIF.
+
+
+  IF r_pl = abap_true AND p_days IS INITIAL.
+    MESSAGE text-013 TYPE lc_type_e.
+  ENDIF.
+
+  IF r_p2 = abap_true.
+    IF p_day_q IS INITIAL.
+      MESSAGE text-014 TYPE lc_type_e.
+    ENDIF.
+    IF s_auart[] IS INITIAL.
+      MESSAGE text-015 TYPE lc_type_e.
+    ENDIF.
+  ENDIF.
+  IF p_rep IS INITIAL.
+    IF r_pl = abap_true AND p_email IS INITIAL.
+      MESSAGE text-002 TYPE lc_type_e.
+      RETURN.
+    ENDIF.
+    IF r_p2 = abap_true AND p_email2 IS INITIAL.
+      MESSAGE text-008 TYPE lc_type_e.
+      RETURN.
+    ENDIF.
+
+  ENDIF.
+  "----------------- Initialization -----------------
+
+INITIALIZATION.
+  " Hydrate s_kschl from your parameter FM once during INIT
+  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+    EXPORTING
+      i_progname      = gc_zvrnsendexppricelist
+      i_name          = gc_zsendprlst
+      i_type          = gc_s
+    TABLES
+      it_hrranges     = lt_skschl
+    EXCEPTIONS
+      wrong_type      = 1
+      wrong_value     = 2
+      inchoerent_type = 3
+      OTHERS          = 4.
+
+  IF sy-subrc = 0.
+    SORT lt_skschl BY low.
+    LOOP AT lt_skschl ASSIGNING FIELD-SYMBOL(<l>).
+      APPEND VALUE #( sign   = gc_sign_i
+                      option = gc_opt_eq
+                      low    = <l>-low ) TO s_kschl.
+    ENDLOOP.
+  ENDIF.
+
+
+  CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+    EXPORTING
+      i_progname      = gc_zvrnsendexppricelist
+      i_name          = gc_zsendquot
+      i_type          = gc_s
+    TABLES
+      it_hrranges     = lt_sauart
+    EXCEPTIONS
+      wrong_type      = 1
+      wrong_value     = 2
+      inchoerent_type = 3
+      OTHERS          = 4.
+
+  IF sy-subrc = 0.
+    SORT lt_sauart BY low.
+    LOOP AT lt_sauart ASSIGNING FIELD-SYMBOL(<a>).
+      APPEND VALUE #( sign   = gc_sign_i
+                      option = gc_opt_eq
+                      low    = <a>-low ) TO s_auart.
+    ENDLOOP.
+  ENDIF.
+
+  *&---------------------------------------------------------------------*
+*&  Include           ZVRNSENDEXPPRICELIST_FORMS
+*&---------------------------------------------------------------------*
+
+CLASS lcl_pricelist_salv_handler DEFINITION.
+  PUBLIC SECTION.
+    METHODS:
+      constructor
+        IMPORTING
+          io_alv        TYPE REF TO cl_salv_table
+          it_pricelists TYPE ty_t_pricelist,
+      on_double_click
+                    FOR EVENT double_click OF cl_salv_events_table
+        IMPORTING row column.
+  PRIVATE SECTION.
+    DATA mo_alv        TYPE REF TO cl_salv_table.
+    DATA mt_pricelists TYPE ty_t_pricelist.
+ENDCLASS.
+
+CLASS lcl_pricelist_salv_handler IMPLEMENTATION.
+  METHOD constructor.
+    mo_alv        = io_alv.
+    mt_pricelists = it_pricelists.
+  ENDMETHOD.
+
+  METHOD on_double_click.
+    " Only react when user double-clicks on KEY_COMBO column
+    IF column <> gc_col_key_combo.
+      RETURN.
+    ENDIF.
+    READ TABLE mt_pricelists INTO ls_pricelist INDEX row.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    DATA(lo_out) = cl_demo_output=>new( ).
+    lo_out->begin_section( text-036 ).
+    lo_out->write_text( ls_pricelist-key_combo ).
+    lo_out->display( ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+FORM run_pricelist .
+  CLEAR : lv_max_days.
+  "Max days allowed from today until 9999-12-31
+  lv_max_days = lc_max_date - sy-datum.
+
+  IF p_days > lv_max_days.
+    lv_date_to = lc_max_date.
+  ELSE.
+    lv_date_to = sy-datum + p_days.
+  ENDIF.
+
+
+  CLEAR lt_kschl.
+  LOOP AT s_kschl ASSIGNING FIELD-SYMBOL(<s>).
+    APPEND VALUE #( kschl = <s>-low ) TO lt_kschl.
+  ENDLOOP.
+
+  IF lt_kschl IS NOT INITIAL.
+    SELECT kvewe,
+           kappl,
+           kschl,
+           kozgf FROM t685 INTO TABLE @DATA(lt_t685)
+           FOR ALL ENTRIES IN @lt_kschl
+           WHERE kschl = @lt_kschl-kschl.
+
+    IF sy-subrc = 0 AND lt_t685 IS NOT INITIAL.
+
+      SELECT kvewe,
+             kappl,
+             kozgf,
+             kolnr,
+             kotabnr FROM t682i INTO TABLE @DATA(lt_t682i)
+             FOR ALL ENTRIES IN @lt_t685
+             WHERE kvewe = @lt_t685-kvewe AND
+                   kappl = @lt_t685-kappl AND
+                   kozgf = @lt_t685-kozgf.
+
+      IF sy-subrc = 0 AND lt_t682i IS NOT INITIAL.
+
+        "Collect all GSTRU values from LT_T682I (each is KVEWE+KOTABNR)
+        LOOP AT lt_t682i ASSIGNING FIELD-SYMBOL(<fs_t682i_cache>).
+          DATA(lv_gstru) = |{ <fs_t682i_cache>-kvewe }{ <fs_t682i_cache>-kotabnr }|.
+          APPEND VALUE #( gstru = lv_gstru ) TO lt_gstru.
+        ENDLOOP.
+
+        SORT lt_gstru BY gstru.
+        DELETE ADJACENT DUPLICATES FROM lt_gstru COMPARING gstru.
+        IF lt_gstru IS NOT INITIAL.
+          SELECT spras,
+                 gstru,
+                 gstxt
+            FROM tmc1t
+            INTO TABLE @lt_tmc1t
+            FOR ALL ENTRIES IN @lt_gstru
+            WHERE spras = @sy-langu
+              AND gstru = @lt_gstru-gstru.
+        ENDIF.
+
+        LOOP AT lt_t682i ASSIGNING FIELD-SYMBOL(<fs_t682i>).
+          DATA(lv_tabname) = |{ <fs_t682i>-kvewe }{ <fs_t682i>-kotabnr }|.
+          CREATE DATA lo_data TYPE TABLE OF (lv_tabname).
+          ASSIGN lo_data->* TO <dyn_table>.
+
+          CLEAR: lt_dfies, lv_has_datbi, lv_tabname2.
+          lv_tabname2  = lv_tabname.
+          CALL FUNCTION 'DDIF_FIELDINFO_GET'
+            EXPORTING
+              tabname        = lv_tabname2
+              langu          = sy-langu
+              all_types      = gc_x
+            TABLES
+              dfies_tab      = lt_dfies
+            EXCEPTIONS
+              not_found      = 1
+              internal_error = 2
+              OTHERS         = 3.
+
+          IF sy-subrc = 0.
+            READ TABLE lt_dfies WITH KEY fieldname = gc_fld_datbi
+                 TRANSPORTING NO FIELDS.
+            IF sy-subrc = 0.
+              lv_has_datbi = abap_true.
+            ENDIF.
+          ENDIF.
+          IF lv_has_datbi = abap_true.
+            SELECT * FROM (lv_tabname)
+              INTO TABLE @<dyn_table>
+              WHERE kschl IN @s_kschl
+              AND datbi >= @sy-datum
+              AND datbi <= @lv_date_to.
+            IF sy-subrc <> 0 OR <dyn_table> IS INITIAL.
+              CONTINUE.
+            ENDIF.
+
+            IF sy-subrc = 0.
+
+              LOOP AT <dyn_table> ASSIGNING <dyn_line>.
+
+                DATA(lv_tab_desc) = VALUE string( ).
+
+                READ TABLE lt_tmc1t INTO DATA(ls_tmc1t)
+                     WITH KEY spras = sy-langu
+                              gstru = lv_tabname
+                     BINARY SEARCH.
+
+                IF sy-subrc = 0.
+                  lv_tab_desc = ls_tmc1t-gstxt.
+                ENDIF.
+
+                ASSIGN COMPONENT gc_fld_kschl   OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_kschl>).
+                IF sy-subrc <> 0.
+                  UNASSIGN <f_kschl>.
+                ENDIF.
+
+                ASSIGN COMPONENT gc_fld_datbi   OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_datbi>).
+                IF sy-subrc <> 0 OR <f_datbi> IS INITIAL.
+                  CONTINUE.
+                ENDIF.
+
+                DATA(lv_days) = <f_datbi> - sy-datum.
+                "Only records expiring within P_DAYS from today
+                IF lv_days <= p_days AND lv_days > 0.
+                  ASSIGN COMPONENT gc_fld_knumh   OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_knumh>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_knumh>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_kunnr OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_kunnr>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_kunnr>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_matnr OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_matnr>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_matnr>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_zzpmatn OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_pmatn>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_pmatn>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_vkorg  OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_vkorg>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_vkorg>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_vtweg  OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_vtweg>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_vtweg>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_spart  OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_spart>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_spart>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_kunag OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_kunag>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_kunag>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_kunwe  OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_kunwe>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_kunwe>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_zzkunzf OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_zzkunzf>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_zzkunzf>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_inco1  OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_inco1>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_inco1>.
+                  ENDIF.
+
+                  ASSIGN COMPONENT gc_fld_vsbed  OF STRUCTURE <dyn_line> TO FIELD-SYMBOL(<f_vsbed>).
+                  IF sy-subrc <> 0.
+                    UNASSIGN <f_vsbed>.
+                  ENDIF.
+
+                  DATA(lv_combo) = ``.
+
+                  IF <f_vkorg> IS ASSIGNED AND <f_vkorg> IS NOT INITIAL.
+                    lv_combo = lv_combo && | { text-038 } { <f_vkorg> }|.
+                  ENDIF.
+
+                  IF <f_vtweg> IS ASSIGNED AND <f_vtweg> IS NOT INITIAL.
+                    lv_combo = lv_combo && | { text-039 } { <f_vtweg> }|.
+                  ENDIF.
+
+                  IF <f_spart> IS ASSIGNED AND <f_spart> IS NOT INITIAL.
+                    lv_combo = lv_combo && | { text-040 } { <f_spart> }|.
+                  ENDIF.
+
+                  IF <f_kunag> IS ASSIGNED AND <f_kunag> IS NOT INITIAL.
+                    DATA(lv_soldto) = CONV kunnr( <f_kunag> ).
+                    lv_combo = lv_combo && | { text-041 } { lv_soldto ALPHA = OUT }|.
+                  ENDIF.
+
+                  IF <f_kunwe> IS ASSIGNED AND <f_kunwe> IS NOT INITIAL.
+                    lv_combo = lv_combo && | { text-042 } { <f_kunwe> }|.
+                  ENDIF.
+                  IF <f_zzkunzf> IS ASSIGNED AND <f_zzkunzf> IS NOT INITIAL.
+                    lv_combo = lv_combo && | { text-043 } { <f_zzkunzf> }|.
+                  ENDIF.
+
+                  IF <f_inco1> IS ASSIGNED AND <f_inco1> IS NOT INITIAL.
+                    lv_combo = lv_combo && | { text-044 } { <f_inco1> }|.
+                  ENDIF.
+
+                  IF <f_vsbed> IS ASSIGNED AND <f_vsbed> IS NOT INITIAL.
+                    lv_combo = lv_combo && | { text-045 } { <f_vsbed> }|.
+                  ENDIF.
+
+                  IF <f_matnr> IS ASSIGNED AND <f_matnr> IS NOT INITIAL.
+                    DATA(lv_mat) = CONV matnr( <f_matnr> ).
+                    lv_combo = lv_combo && | { text-046 } { lv_mat ALPHA = OUT }|.
+                  ENDIF.
+                  IF <f_pmatn> IS ASSIGNED AND <f_pmatn> IS NOT INITIAL.
+                    DATA(lv_prref) = CONV pmatn( <f_pmatn> ).
+                    lv_combo = lv_combo && | { text-047 } { lv_prref ALPHA = OUT }|.
+                  ENDIF.
+
+                  CLEAR ls_pricelist.
+                  ls_pricelist-kschl     = COND #( WHEN <f_kschl> IS ASSIGNED THEN <f_kschl> ).
+                  ls_pricelist-knumh     = <f_knumh>.
+                  ls_pricelist-datbi     = <f_datbi>.
+                  ls_pricelist-days_left = <f_datbi> - sy-datum.
+                  ls_pricelist-key_desc  = lv_tab_desc.
+                  CONDENSE lv_combo.
+                  ls_pricelist-key_combo = lv_combo.
+
+                  ls_pricelist-vkorg   = COND #( WHEN <f_vkorg> IS ASSIGNED THEN <f_vkorg> ).
+                  ls_pricelist-vtweg   = COND #( WHEN <f_vtweg> IS ASSIGNED THEN <f_vtweg> ).
+                  ls_pricelist-spart   = COND #( WHEN <f_spart> IS ASSIGNED THEN <f_spart> ).
+                  ls_pricelist-kunnr   = COND #( WHEN <f_kunnr> IS ASSIGNED THEN <f_kunnr> ).
+                  ls_pricelist-kunag   = COND #( WHEN <f_kunag> IS ASSIGNED THEN <f_kunag> ).
+                  ls_pricelist-kunwe   = COND #( WHEN <f_kunwe> IS ASSIGNED THEN <f_kunwe> ).
+                  ls_pricelist-inco1   = COND #( WHEN <f_inco1> IS ASSIGNED THEN <f_inco1> ).
+                  ls_pricelist-vsbed   = COND #( WHEN <f_vsbed> IS ASSIGNED THEN <f_vsbed> ).
+                  ls_pricelist-matnr   = COND #( WHEN <f_matnr> IS ASSIGNED THEN <f_matnr> ).
+                  ls_pricelist-zzpmatn = COND #( WHEN <f_pmatn> IS ASSIGNED THEN <f_pmatn> ).
+                  ls_pricelist-zzkunzf = COND #( WHEN <f_zzkunzf> IS ASSIGNED THEN <f_zzkunzf> ).
+
+                  IF ( s_vkorg[] IS INITIAL OR ls_pricelist-vkorg IN s_vkorg ) AND
+                     ( s_matnr[] IS INITIAL OR ls_pricelist-matnr IN s_matnr ) AND
+                     ( s_kunnr[] IS INITIAL OR ls_pricelist-kunag IN s_kunnr ) AND
+                     ( s_zzpmat[] IS INITIAL OR ls_pricelist-zzpmatn IN s_zzpmat ).
+
+                    APPEND ls_pricelist TO lt_pricelists.
+                    CLEAR: ls_pricelist .
+                  ENDIF.
+                ENDIF.
+              ENDLOOP.
+            ENDIF.
+          ELSE.
+            CONTINUE.
+          ENDIF.
+        ENDLOOP.
+        SORT lt_pricelists BY kschl knumh.
+        DELETE ADJACENT DUPLICATES FROM lt_pricelists COMPARING knumh.
+
+        "-------------------------------------------------------------
+        " 1) Build distinct list of KNUMH from lt_pricelists
+
+        lt_knumh_final = VALUE #(
+          FOR wa IN lt_pricelists
+          WHERE ( knumh IS NOT INITIAL )
+          ( wa-knumh )
+        ).
+        "-------------------------------------------------------------
+        " 2) Single KONP SELECT outside any LOOP (as requested)
+        "-------------------------------------------------------------
+
+        IF lt_knumh_final IS NOT INITIAL.
+          SELECT knumh
+                 kschl
+                 loevm_ko
+            FROM konp
+            INTO TABLE lt_konp_final
+            FOR ALL ENTRIES IN lt_knumh_final
+            WHERE knumh    = lt_knumh_final-table_line
+              AND kschl  IN s_kschl.  "optional, like before
+        ENDIF.
+
+        "-------------------------------------------------------------
+        " 3) Filter lt_pricelists based on KONP result in memory
+        "-------------------------------------------------------------
+
+        SORT lt_konp_final BY knumh loevm_ko.
+
+        LOOP AT lt_pricelists INTO ls_pricelist.
+          " Find KONP entry(s) for this KNUMH
+          READ TABLE lt_konp_final INTO DATA(ls_konp_final)
+               WITH KEY knumh = ls_pricelist-knumh
+                        loevm_ko = gc_x
+               BINARY SEARCH.
+
+          IF sy-subrc = 0.
+            " There is a KONP with loevm_ko = 'X' for this KNUMH -> skip
+            CONTINUE.
+          ENDIF.
+
+          " Otherwise, keep it
+          APPEND ls_pricelist TO lt_pricelists_clean.
+          CLEAR ls_pricelist.
+        ENDLOOP.
+
+        " Replace original table with filtered one
+        lt_pricelists = lt_pricelists_clean.
+        CLEAR lt_pricelists_clean.
+
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+  SORT lt_pricelists BY kschl key_desc days_left datbi.
+  CLEAR lv_group_key.
+  REFRESH lt_body.
+  LOOP AT lt_pricelists INTO ls_pricelist.
+    DATA(lv_new_group) = |{ ls_pricelist-kschl }_{ ls_pricelist-key_desc }_{ ls_pricelist-days_left }|.
+
+    IF lv_new_group <> lv_group_key.
+      lv_group_key = lv_new_group.
+
+      DATA(lv_unit) =
+        COND string( WHEN ls_pricelist-days_left = 1 THEN text-048 ELSE text-049 ).
+
+      DATA(lv_header) =
+        |{ ls_pricelist-kschl } { text-050 } { ls_pricelist-key_desc }{ text-051 } { ls_pricelist-days_left } { lv_unit } { text-052 }|.
+
+      APPEND lv_header TO lt_body.
+    ENDIF.
+
+    lv_datbi_formatted =
+      |{ ls_pricelist-datbi+6(2) }.{ ls_pricelist-datbi+4(2) }.{ ls_pricelist-datbi(4) }|.
+
+    DATA(lv_detail) =
+      |{ text-053 } { ls_pricelist-knumh }{ ls_pricelist-key_combo } { text-054 } { lv_datbi_formatted }|.
+
+    CONDENSE lv_detail.
+    APPEND lv_detail TO lt_body.
+  ENDLOOP.
+
+  IF p_rep = abap_true.
+    IF lt_pricelists IS INITIAL.
+      MESSAGE text-001 TYPE lc_type_i.
+      RETURN.
+    ENDIF.
+
+*    TRY.
+*        cl_salv_table=>factory(
+*          IMPORTING
+*            r_salv_table = lo_alv
+*          CHANGING
+*            t_table      = lt_pricelists ).
+*
+*        lo_alv->get_functions( )->set_all( abap_true ).
+*        lo_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+*        lo_alv->get_display_settings( )->set_list_header( text-027 ).
+*
+*        " Column handling
+*        DATA(lo_cols) = lo_alv->get_columns( ).
+*
+*        TRY.
+*            lo_cols->get_column( gc_col_vkorg     )->set_long_text( text-020 ).
+*            lo_cols->get_column( gc_col_kschl     )->set_long_text( text-028 ).
+*            lo_cols->get_column( gc_col_days_left )->set_long_text( text-021 ).
+*            lo_cols->get_column( gc_col_key_desc  )->set_long_text( text-029 ).
+*            lo_cols->get_column( gc_col_datbi     )->set_long_text( text-026 ).
+*            lo_cols->get_column( gc_col_key_combo )->set_long_text( text-032 ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*
+*        TRY.
+*            DATA(lo_col_key_combo) = lo_cols->get_column( gc_col_key_combo ).
+*            lo_col_key_combo->set_visible( if_salv_c_bool_sap=>true ).
+*            lo_col_key_combo->set_output_length( gc_len_key_combo ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_vkorg) = lo_cols->get_column( gc_col_vkorg ).
+*            lo_col_vkorg->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_kschl) = lo_cols->get_column( gc_col_kschl ).
+*            lo_col_kschl->set_visible( if_salv_c_bool_sap=>true ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_days_left) = lo_cols->get_column( gc_col_days_left ).
+*            lo_col_days_left->set_visible( if_salv_c_bool_sap=>true ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_key_desc) = lo_cols->get_column( gc_col_key_desc ).
+*            lo_col_key_desc->set_visible( if_salv_c_bool_sap=>true ).
+*            lo_col_key_desc->set_output_length( gc_len_key_desc ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_datbi) = lo_cols->get_column( gc_col_datbi ).
+*            lo_col_datbi->set_visible( if_salv_c_bool_sap=>true ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_datum) = lo_cols->get_column( gc_col_datum ).
+*            lo_col_datum->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_kunmh) = lo_cols->get_column( gc_col_knumh ).
+*            lo_col_kunmh->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_vtweg) = lo_cols->get_column( gc_col_vtweg ).
+*            lo_col_vtweg->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_spart) = lo_cols->get_column( gc_col_spart ).
+*            lo_col_spart->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_kunnr) = lo_cols->get_column( gc_col_kunnr ).
+*            lo_col_kunnr->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_kunag) = lo_cols->get_column( gc_col_kunag ).
+*            lo_col_kunag->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_kunwe) = lo_cols->get_column( gc_col_kunwe ).
+*            lo_col_kunwe->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_zzkunzf) = lo_cols->get_column( gc_col_zzkunzf ).
+*            lo_col_zzkunzf->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_incol) = lo_cols->get_column( gc_col_inco1 ).
+*            lo_col_incol->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_vsbed) = lo_cols->get_column( gc_col_vsbed ).
+*            lo_col_vsbed->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_matnr) = lo_cols->get_column( gc_col_matnr ).
+*            lo_col_matnr->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*        TRY.
+*            DATA(lo_col_zzpmatn) = lo_cols->get_column( gc_col_zzpmatn ).
+*            lo_col_zzpmatn->set_visible( if_salv_c_bool_sap=>false ).
+*          CATCH cx_salv_not_found.
+*        ENDTRY.
+*
+*
+*        " --- Register double-click handler for detail popup ---
+*        DATA(lo_events)  = lo_alv->get_event( ).
+*        DATA(lo_handler) = NEW lcl_pricelist_salv_handler(
+*                              io_alv        = lo_alv
+*                              it_pricelists = lt_pricelists ).
+*
+*        SET HANDLER lo_handler->on_double_click FOR lo_events.
+*
+*        lo_alv->display( ).
+*
+*      CATCH cx_salv_msg INTO DATA(lx).
+*        MESSAGE lx->get_text( ) TYPE lc_type_e.
+*    ENDTRY.
+
+*********************************************************************************************keerthi
+
+
+
+*    IF lt_pricelists IS NOT INITIAL.
+*      CALL SCREEN 100.
+*    ENDIF.
+
+
+    CLEAR gs_fieldcat.
+    gs_fieldcat-col_pos   = 1.
+    gs_fieldcat-fieldname = gc_col_vkorg.
+    gs_fieldcat-seltext_m = text-020.
+    APPEND gs_fieldcat TO gt_fieldcat.
+
+    CLEAR gs_fieldcat.
+    gs_fieldcat-col_pos   = 2.
+    gs_fieldcat-fieldname = gc_col_kschl.
+    gs_fieldcat-seltext_m = text-028.
+    APPEND gs_fieldcat TO gt_fieldcat.
+
+    CLEAR gs_fieldcat.
+    gs_fieldcat-col_pos   = 3.
+    gs_fieldcat-fieldname = gc_col_days_left.
+    gs_fieldcat-seltext_m = text-021.
+    APPEND gs_fieldcat TO gt_fieldcat.
+
+    CLEAR gs_fieldcat.
+    gs_fieldcat-col_pos   = 4.
+    gs_fieldcat-fieldname = gc_col_key_desc.
+    gs_fieldcat-seltext_m = text-029.
+    APPEND gs_fieldcat TO gt_fieldcat.
+
+    CLEAR gs_fieldcat.
+    gs_fieldcat-col_pos   = 5.
+    gs_fieldcat-fieldname = gc_col_datbi.
+    gs_fieldcat-seltext_m = text-026.
+    APPEND gs_fieldcat TO gt_fieldcat.
+
+    CLEAR gs_fieldcat.
+    gs_fieldcat-col_pos   = 6.
+    gs_fieldcat-seltext_l = text-032.
+    gs_fieldcat-outputlen = 200.
+    gs_fieldcat-fieldname = gc_col_key_combo.
+    APPEND gs_fieldcat TO gt_fieldcat.
+
+
+
+    CALL FUNCTION 'REUSE_ALV_list_DISPLAY'
+      EXPORTING
+        i_callback_program = sy-repid
+*       is_layout          = gs_layout
+        it_fieldcat        = gt_fieldcat
+      TABLES
+        t_outtab           = lt_pricelists
+      EXCEPTIONS
+        program_error      = 1
+        OTHERS             = 2.
+
+    IF sy-subrc <> 0.
+      MESSAGE 'Error displaying ALV' TYPE 'E'.
+    ENDIF.
+
+
+
+
+
+*********************************************************************************************keerthi
+
+  ELSE.
+
+    DATA(lo_email_sender) = NEW zcl_email_sender( ).
+
+*    IF p_email IS INITIAL.
+*      MESSAGE text-002 TYPE lc_type_e.
+*      RETURN.
+*    ENDIF.
+
+    IF lt_body IS INITIAL.
+      MESSAGE text-003 TYPE lc_type_e.
+      RETURN.
+    ENDIF.
+
+    SELECT vkorg,
+           vtext
+      FROM tvkot
+      WHERE spras = @sy-langu AND vkorg IN @s_vkorg
+      INTO TABLE @lt_tvkot.
+    SORT lt_tvkot BY vkorg.
+    DELETE ADJACENT DUPLICATES FROM lt_tvkot COMPARING vkorg.
+
+    CLEAR lv_subject_vtext.
+    LOOP AT lt_tvkot INTO ls_row.
+      DATA(lv_piece) = to_upper( ls_row-vtext ).
+      IF lv_subject_vtext IS INITIAL.
+        lv_subject_vtext = lv_piece.
+      ELSE.
+        CONCATENATE lv_subject_vtext lv_piece INTO lv_subject_vtext SEPARATED BY text-055.
+      ENDIF.
+    ENDLOOP.
+    CONDENSE lv_subject_vtext.
+    IF lv_subject_vtext IS INITIAL.
+      lv_email_sub = text-004.
+    ELSE.
+      lv_email_sub = |{ text-056 } { lv_subject_vtext }|.
+    ENDIF.
+
+    DATA(lv_success) = lo_email_sender->send_email(
+       iv_subject            = lv_email_sub
+       it_body               = lt_body
+       iv_recipients         = p_email
+       iv_cc                 = p_eml_cc
+       iv_doc_type           = gc_doc_raw
+       iv_delimiter          = gc_delim_sc ).
+
+    IF lv_success = abap_true.
+      MESSAGE text-005 TYPE lc_type_s.
+    ELSE.
+      MESSAGE text-006 TYPE lc_type_e.
+    ENDIF.
+
+    CLEAR : lo_email_sender,lv_success.
+    REFRESH : lt_body.
+
+  ENDIF.
+
+ENDFORM.
+
+FORM run_quotation .
+
+  CLEAR:lt_quotes,lv_max_days.
+  lv_q_from = sy-datum.
+  lv_max_days = lc_max_date - sy-datum.
+  IF p_day_q > lv_max_days.
+    lv_q_to = lc_max_date.
+  ELSE.
+    lv_q_to = sy-datum + p_day_q.
+  ENDIF.
+
+  SELECT a~vbeln,
+         a~auart,
+         a~vkorg,
+         a~angdt,
+         a~bnddt,
+         a~kunnr,
+         b~objnr,
+         b~posnr,
+         b~matnr,
+         t~maktx,
+         d~name1,
+         j~stat
+    FROM vbak AS a
+    INNER JOIN vbap AS b ON a~vbeln = b~vbeln
+    INNER JOIN mara AS c ON b~matnr = c~matnr
+    INNER JOIN kna1 AS d ON a~kunnr = d~kunnr
+    LEFT  JOIN makt AS t ON b~matnr = t~matnr AND t~spras = @sy-langu
+    INNER JOIN jest AS j ON b~objnr = j~objnr
+    INTO TABLE @DATA(lt_vbak)
+    WHERE a~vbtyp = @lc_vbtyp_quote
+      AND a~vkorg IN @s_vkorg
+      AND a~auart IN @s_auart
+      AND a~bnddt >= @lv_q_from
+      AND a~kunnr IN @s_kunr_q
+      AND j~stat  IN @lt_qstat   " WON status
+      AND j~inact = @space.       " active only
+
+
+
+  LOOP AT lt_vbak INTO DATA(ls_vbak).
+    DATA(lv_days2) = ls_vbak-bnddt - sy-datum.
+
+    IF lv_days2 <= p_day_q AND lv_days2 >= 0.
+      ls_quote-vbeln     = ls_vbak-vbeln.
+      ls_quote-auart     = ls_vbak-auart.
+      ls_quote-posnr     = ls_vbak-posnr.
+      ls_quote-days_left = lv_days2.
+      ls_quote-vkorg     = ls_vbak-vkorg.
+      ls_quote-kunnr     = ls_vbak-kunnr.
+      ls_quote-name1     = ls_vbak-name1.
+      ls_quote-matnr     = ls_vbak-matnr.
+      ls_quote-maktx     = ls_vbak-maktx.
+      ls_quote-angdt     = ls_vbak-angdt.
+      ls_quote-bnddt     = ls_vbak-bnddt.
+
+      APPEND ls_quote TO lt_quotes.
+      CLEAR: ls_quote.
+    ENDIF.
+*    ENDIF.
+  ENDLOOP.
+
+  CLEAR: lt_body2, lv_group_key.
+  SORT lt_quotes BY days_left vkorg vbeln.
+
+  LOOP AT lt_quotes INTO ls_quote.
+
+    DATA(lv_new_group2) = |{ ls_quote-days_left }_{ ls_quote-vkorg }|.
+
+    IF lv_new_group2 <> lv_group_key.
+      lv_group_key = lv_new_group2.
+
+      DATA(lv_unit2) = COND string(
+                        WHEN ls_quote-days_left = 1 THEN text-048
+                        ELSE text-049 ).
+
+      DATA(lv_header2) = |{ text-057 } { ls_quote-days_left } { lv_unit2 } { text-050 } { ls_quote-vkorg }|.
+      APPEND lv_header2  TO lt_body2.
+    ENDIF.
+
+    DATA(lv_bnddt_formatted) =
+      |{ ls_quote-bnddt+6(2) }.{ ls_quote-bnddt+4(2) }.{ ls_quote-bnddt(4) }|.
+
+    DATA(lv_detail2) = |{ text-058 }{ ls_quote-vbeln } { text-059 }{ ls_quote-posnr }{ text-060 }{ ls_quote-kunnr
+     } { text-061 }{ ls_quote-name1 } { text-046 } { ls_quote-matnr } { text-062 } {
+      ls_quote-maktx } { text-063 } { lv_bnddt_formatted }|.
+    CONDENSE lv_detail2.
+    APPEND   lv_detail2 TO lt_body2.
+  ENDLOOP.
+
+  IF p_rep = abap_true.
+    IF lt_quotes IS INITIAL.
+      MESSAGE text-001 TYPE lc_type_i.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        cl_salv_table=>factory(
+          IMPORTING
+            r_salv_table = lo_alv_q
+          CHANGING
+            t_table      = lt_quotes ).
+
+        lo_alv_q->get_functions( )->set_all( abap_true ).
+        lo_alv_q->get_display_settings( )->set_striped_pattern( abap_true ).
+        lo_alv_q->get_display_settings( )->set_list_header( text-031 ).
+
+        DATA(lo_cols) = lo_alv_q->get_columns( ).
+        lo_cols->set_optimize( abap_true ).
+        TRY.
+            lo_cols->get_column( gc_col_auart     )->set_long_text(   text-017 ).
+            lo_cols->get_column( gc_col_vbeln     )->set_medium_text( text-018 ).
+            lo_cols->get_column( gc_col_posnr     )->set_long_text(   text-019 ).
+            lo_cols->get_column( gc_col_vkorg     )->set_long_text(   text-020 ).
+            lo_cols->get_column( gc_col_days_left )->set_long_text(   text-021 ).
+            lo_cols->get_column( gc_col_kunnr     )->set_long_text(   text-022 ).
+            lo_cols->get_column( gc_col_name1     )->set_long_text(   text-023 ).
+            lo_cols->get_column( gc_col_matnr     )->set_long_text(   text-024 ).
+            lo_cols->get_column( gc_col_maktx     )->set_long_text(   text-025 ).
+            lo_cols->get_column( gc_col_angdt     )->set_long_text(   text-016 ).
+            lo_cols->get_column( gc_col_bnddt     )->set_long_text(   text-026 ).
+          CATCH cx_salv_not_found.
+        ENDTRY.
+        TRY.
+            DATA(lo_col_vkorg2) = lo_cols->get_column( gc_col_vkorg ).
+            lo_col_vkorg2->set_visible( if_salv_c_bool_sap=>false ).
+          CATCH cx_salv_not_found.
+        ENDTRY.
+
+        lo_alv_q->display( ).
+
+      CATCH cx_salv_msg INTO DATA(lx_q).
+        MESSAGE lx_q->get_text( ) TYPE lc_type_e.
+    ENDTRY.
+
+    RETURN.
+
+  ELSE.
+
+    IF lt_body2 IS INITIAL.
+      MESSAGE text-007 TYPE lc_type_i.
+      RETURN.
+    ENDIF.
+
+*    IF p_email2 IS INITIAL.
+*      MESSAGE text-008 TYPE lc_type_e.
+*      RETURN.
+*    ENDIF.
+
+    DATA(lo_email_sender2) = NEW zcl_email_sender( ).
+
+    " Read Sales Org descriptions for selected VKORGs
+    SELECT vkorg,
+           vtext
+      FROM tvkot
+      WHERE spras = @sy-langu
+        AND vkorg IN @s_vkorg
+      INTO TABLE @lt_tvkot_q.
+
+    SORT lt_tvkot_q BY vkorg.
+    DELETE ADJACENT DUPLICATES FROM lt_tvkot_q COMPARING vkorg.
+
+    CLEAR lv_subject_vtext_q.
+
+    LOOP AT lt_tvkot_q INTO ls_row_q.
+      DATA(lv_piece_q) = to_upper( ls_row_q-vtext ).
+      IF lv_subject_vtext_q IS INITIAL.
+        lv_subject_vtext_q = lv_piece_q.
+      ELSE.
+        CONCATENATE lv_subject_vtext_q lv_piece_q INTO lv_subject_vtext_q SEPARATED BY text-055.
+      ENDIF.
+    ENDLOOP.
+    CONDENSE lv_subject_vtext_q.
+
+    IF lv_subject_vtext_q IS INITIAL.
+      lv_subject2 = text-009.
+    ELSE.
+      lv_subject2 = |{ text-064 } { lv_subject_vtext_q }|.
+    ENDIF.
+
+    DATA(lv_ok) = lo_email_sender2->send_email(
+                   iv_subject    = lv_subject2
+                   it_body       = lt_body2
+                   iv_recipients = p_email2
+                   iv_cc         = p_em2_cc
+                   iv_doc_type   = gc_doc_raw
+                   iv_delimiter  = gc_delim_sc ).
+
+    IF lv_ok = abap_true.
+      MESSAGE text-010 TYPE lc_type_s.
+    ELSE.
+      MESSAGE text-011 TYPE lc_type_e.
+    ENDIF.
+
+    IF lt_quotes IS INITIAL.
+      MESSAGE text-012 TYPE lc_type_i.
+      RETURN.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.
