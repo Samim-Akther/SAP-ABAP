@@ -1,0 +1,12 @@
+there is standard tcode mf60
+here we have added an enhancement 
+CMOD-ZUOM_PAL this is the project name i have created 
+here in the componenet -> function exit 
+and there there is include -confirmed throgh debug
+inside that include ->
+*&---------------------------------------------------------------------*
+*&  Include           ZXRMPU05
+*&---------------------------------------------------------------------*
+IF i_meins = 'KG'.
+  c_erfme = 'PAL'.
+ENDIF.
