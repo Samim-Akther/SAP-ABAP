@@ -1,0 +1,290 @@
+class ZCL_EMAIL_SENDER definition
+  public
+  final
+  create public .
+
+public section.
+
+  methods SEND_EMAIL
+    importing
+      !IV_SUBJECT type SO_OBJ_DES optional
+      !IV_LONG_SUBJECT type STRING optional
+      !IT_BODY type SOLI_TAB
+      !IV_SENDER type ADR6-SMTP_ADDR optional
+      !IV_RECIPIENTS type STRING
+      !IV_CC type STRING optional
+      !IV_BCC type STRING optional
+      !IV_DOC_TYPE type SO_OBJ_TP optional
+      !IV_DELIMITER type CHAR1 optional
+      !IT_ATTACHMENTS type ZATTACHEMENT_TT optional
+      !IV_ATTACHMENT_TYPE type SO_OBJ_TP optional
+      !IV_ATTACHMENT_SUBJECT type STRING optional
+    returning
+      value(RV_SUCCESS) type ABAP_BOOL .
+protected section.
+private section.
+
+  methods CREATE_DOCUMENT
+    importing
+      !IV_SUBJECT type SO_OBJ_DES
+      !IT_BODY type SOLI_TAB
+      !IV_DOC_TYPE type SO_OBJ_TP
+    returning
+      value(RO_DOCUMENT) type ref to CL_DOCUMENT_BCS .
+  methods ADD_RECIPIENTS
+    importing
+      !IV_RECIPIENTS type STRING
+      !IV_DELIMITER type CHAR1 optional
+      !IO_SEND_REQ type ref to CL_BCS
+      !IV_TYPE type CHAR1
+    raising
+      CX_SEND_REQ_BCS .
+ENDCLASS.
+
+
+
+CLASS ZCL_EMAIL_SENDER IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_EMAIL_SENDER->ADD_RECIPIENTS
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_RECIPIENTS                  TYPE        STRING
+* | [--->] IV_DELIMITER                   TYPE        CHAR1(optional)
+* | [--->] IO_SEND_REQ                    TYPE REF TO CL_BCS
+* | [--->] IV_TYPE                        TYPE        CHAR1
+* | [!CX!] CX_SEND_REQ_BCS
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD add_recipients.
+
+  DATA: lt_emails   TYPE STANDARD TABLE OF  string,
+        lv_email    TYPE adr6-smtp_addr,
+        lo_receiver TYPE REF TO if_recipient_bcs,
+        Lv_delim    TYPE char1.
+
+" Default delimiter if not passed
+  lv_delim = COND char1( WHEN iv_delimiter IS INITIAL THEN ','
+   ELSE iv_delimiter ).
+
+  " Split the input string into individual email addresses
+  SPLIT iv_recipients AT lv_delim INTO TABLE lt_emails.
+
+
+  LOOP AT lt_emails INTO lv_email.
+    TRY.
+        lo_receiver = cl_cam_address_bcs=>create_internet_address(
+lv_email ).
+
+
+" Add recipient based on type
+        CASE iv_type.
+          WHEN 'T'. " TO
+            io_send_req->add_recipient(
+              EXPORTING
+                i_recipient = lo_receiver
+                i_express   = abap_true ).
+
+          WHEN 'C'. " CC
+            io_send_req->add_recipient(
+              EXPORTING
+                i_recipient = lo_receiver
+                i_copy      = abap_true ).
+
+          WHEN 'B'. " BCC
+            io_send_req->add_recipient(
+              EXPORTING
+                i_recipient   = lo_receiver
+                i_blind_copy  = abap_true ).
+        ENDCASE.
+
+
+      CATCH cx_address_bcs INTO DATA(lo_addr_err).
+        " Invalid email address format
+        MESSAGE |Invalid email address: { lv_email }| TYPE 'E'.
+        CONTINUE.
+
+      CATCH cx_send_req_bcs INTO DATA(lo_send_err).
+        " Failed to add recipient to send request
+        MESSAGE |Failed to add recipient: { lv_email }| TYPE 'E'.
+        CONTINUE.
+    ENDTRY.
+
+  ENDLOOP.
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_EMAIL_SENDER->CREATE_DOCUMENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_SUBJECT                     TYPE        SO_OBJ_DES
+* | [--->] IT_BODY                        TYPE        SOLI_TAB
+* | [--->] IV_DOC_TYPE                    TYPE        SO_OBJ_TP
+* | [<-()] RO_DOCUMENT                    TYPE REF TO CL_DOCUMENT_BCS
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD create_document.
+
+  DATA: lv_type  TYPE SO_OBJ_TP.
+
+  " Validate or default the document type
+  CASE iv_doc_type.
+    WHEN 'RAW' OR 'HTM'.
+      lv_type = iv_doc_type.
+    WHEN OTHERS.
+      lv_type = 'RAW'. " Default fallback
+  ENDCASE.
+
+  TRY.
+      ro_document = cl_document_bcs=>create_document(
+        i_type    = lv_type
+        i_subject = iv_subject
+        i_text    = it_body
+      ).
+    CATCH cx_bcs INTO DATA(lo_doc_error).
+      CLEAR ro_document. " Use CLEAR instead of NULL
+  ENDTRY.
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_EMAIL_SENDER->SEND_EMAIL
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_SUBJECT                     TYPE        SO_OBJ_DES(optional)
+* | [--->] IV_LONG_SUBJECT                TYPE        STRING(optional)
+* | [--->] IT_BODY                        TYPE        SOLI_TAB
+* | [--->] IV_SENDER                      TYPE        ADR6-SMTP_ADDR(optional)
+* | [--->] IV_RECIPIENTS                  TYPE        STRING
+* | [--->] IV_CC                          TYPE        STRING(optional)
+* | [--->] IV_BCC                         TYPE        STRING(optional)
+* | [--->] IV_DOC_TYPE                    TYPE        SO_OBJ_TP(optional)
+* | [--->] IV_DELIMITER                   TYPE        CHAR1(optional)
+* | [--->] IT_ATTACHMENTS                 TYPE        ZATTACHEMENT_TT(optional)
+* | [--->] IV_ATTACHMENT_TYPE             TYPE        SO_OBJ_TP(optional)
+* | [--->] IV_ATTACHMENT_SUBJECT          TYPE        STRING(optional)
+* | [<-()] RV_SUCCESS                     TYPE        ABAP_BOOL
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD send_email.
+
+    DATA: lo_document     TYPE REF TO cl_document_bcs,
+          lo_send_request TYPE REF TO cl_bcs,
+          lv_sent         TYPE os_boolean,
+          lv_delim        TYPE char1,
+          lo_sender       TYPE REF TO cl_cam_address_bcs.
+
+
+    IF it_body IS INITIAL.
+      rv_success = abap_false.
+      RETURN.
+    ENDIF.
+
+    " Default delimiter if not passed
+    lv_delim = COND char1( WHEN iv_delimiter IS INITIAL THEN ',' ELSE
+  iv_delimiter ).
+
+    TRY.
+        lo_document = create_document(
+                        iv_subject  = iv_subject
+                        it_body     = it_body
+                        iv_doc_type = iv_doc_type ).
+
+
+        " Optional: add attachments if provided
+        IF it_attachments IS NOT INITIAL.
+
+          " ZCL_EMAIL_SENDER->send_email  (inside the loop at it_attachments)
+          LOOP AT it_attachments ASSIGNING FIELD-SYMBOL(<fs_attach>).
+            lo_document->add_attachment(
+              EXPORTING
+       i_attachment_type    = COND #( WHEN iv_attachment_type IS INITIAL
+                                      THEN 'PDF'
+                                      ELSE iv_attachment_type )
+       i_attachment_subject = COND #( WHEN <fs_attach>-subject IS NOT
+ INITIAL
+                                      THEN <fs_attach>-subject
+                                      WHEN iv_attachment_subject IS NOT
+ INITIAL
+                                      THEN iv_attachment_subject
+                                      ELSE 'attachment.pdf' )
+       i_att_content_hex    = <fs_attach>-content ).
+          ENDLOOP.
+
+        ENDIF.
+        " Create send requesT
+        lo_send_request = cl_bcs=>create_persistent( ).
+        lo_send_request->set_document( lo_document ).
+""""""new added by n.sen for more than 50 char""""""
+        IF iv_long_subject IS NOT INITIAL.
+          TRY.
+              lo_send_request->set_message_subject( iv_long_subject ).
+            CATCH cx_bcs INTO DATA(lx_subj).
+              " Optional: log; fallback is the document's 50-char subject
+          ENDTRY.
+        ENDIF.
+""""""""""""""""""end of new """"""""""""""""""""
+        "If sender is passed
+        IF iv_sender IS NOT INITIAL.
+          TRY.
+              lo_sender = cl_cam_address_bcs=>create_internet_address(
+                            i_address_string = iv_sender ).
+
+              IF lo_sender IS BOUND.
+                lo_send_request->set_sender( lo_sender ).
+              ENDIF.
+
+            CATCH cx_address_bcs INTO DATA(lx_addr).
+              " Invalid sender address → fallback to default SAP sender
+          ENDTRY.
+        ENDIF.
+
+        " Add recipients
+        " TO Recipients
+        add_recipients(
+          iv_recipients = iv_recipients
+          iv_delimiter  = lv_delim
+          io_send_req   = lo_send_request
+          iv_type       = 'T' ).
+
+        " CC Recipients
+        IF iv_cc IS NOT INITIAL.
+          add_recipients(
+            iv_recipients = iv_cc
+            iv_delimiter  = lv_delim
+            io_send_req   = lo_send_request
+            iv_type       = 'C' ).
+        ENDIF.
+
+        " BCC Recipients
+        IF iv_bcc IS NOT INITIAL.
+          add_recipients(
+            iv_recipients = iv_bcc
+            iv_delimiter  = lv_delim
+            io_send_req   = lo_send_request
+            iv_type       = 'B' ).
+        ENDIF.
+        " Send emaiL
+        CALL METHOD lo_send_request->send
+          EXPORTING
+            i_with_error_screen = abap_true
+          RECEIVING
+            result              = lv_sent.
+
+        COMMIT WORK.
+
+        rv_success = COND #( WHEN lv_sent = 'X' THEN abap_true ELSE
+         abap_false ).
+
+      CATCH cx_bcs INTO DATA(lo_bcs_error).
+        rv_success = abap_false.
+        MESSAGE lo_bcs_error->get_text( ) TYPE 'E'.
+    ENDTRY.
+
+  ENDMETHOD.
+ENDCLASS.
+
+==================================
+ZATTACHEMENT
+TYPE	Types	SO_OBJ_TP	CHAR	3	0	Code for document class
+SUBJECT	Types	SO_OBJ_DES	CHAR	50	0	Short description of contents
+CONTENT	Types	SOLIX_TAB		0	0	GBT: SOLIX as Table Type
+______________________________	                                                                                                                                                                                                                                                               	______________________________	____________________________________________________________________________________________________________________________________	______	______	____________________________________________________________
