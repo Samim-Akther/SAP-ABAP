@@ -1,0 +1,44 @@
+sq02/sq03 
+infoset -> query -> additional fields these things are present here 
+so i have added code in the sq02 ->infoset -> additional field -zfields 
+for a perticuler field -> code i have added 
+it was about filter the data and we have done like this 
+CLEAR : ZBELNR.
+*AM BOM 03.04.2026 7581
+data ls_bkpf type bkpf.
+select single * from bkpf into ls_bkpf
+  where
+  bukrs = vbrk-bukrs and
+  xblnr = vbrk-vbeln and
+  gjahr = vbrk-fkdat(4).
+  if sy-subrc = 0.
+    select single BELNR
+      from BSID
+      into ZBELNR
+      where
+      VBELN = VBRK-VBELN and
+      bukrs = ls_bkpf-bukrs and
+      belnr = ls_bkpf-belnr and
+      gjahr = ls_bkpf-gjahr.
+      if sy-subrc ne 0.
+         select single BELNR
+      from BSAD
+      into ZBELNR
+      where
+      VBELN = VBRK-VBELN and
+      bukrs = ls_bkpf-bukrs and
+      belnr = ls_bkpf-belnr and
+      gjahr = ls_bkpf-gjahr.
+      endif.
+    endif.
+*Select single BELNR
+*   from BSID
+*   into ZBELNR
+*   WHERE VBELN = VBRK-VBELN.
+*   IF SY-SUBRC <> 0.
+*Select single BELNR
+*   from BSAD
+*   into ZBELNR
+*   WHERE VBELN = VBRK-VBELN.
+*ENDIF.
+*AM EOM 03.04.2026 7581
