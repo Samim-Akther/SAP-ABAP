@@ -1,0 +1,803 @@
+I have created a report instead of standard tcode user wants a report 
+and to achieve that i have used a bapi tcode qa16/11 
+
+**********************************************************************
+**********************************************************************
+*  Transaction code  :                                               *
+*  Program Name      : ZPPRINCPALLETS                                *
+*  Created by        : Samim                                         *
+*  Created on        : 07.01.2026                                    *
+*  Description       : Usage decision for incomplete pallets returned*                        *
+*  TR Number         : S01K938133                                    *
+**********************************************************************
+*--------------------------------------------------------------------*
+* Modification log:
+*-----------------------------------------------------------------*
+
+REPORT zpprincompallets.
+
+INCLUDE ZPPRINCOMPALLETS_TOP.
+INCLUDE ZPPRINCOMPALLETS_SEL.
+INCLUDE ZPPRINCOMPALLETS_FORMS.
+
+
+
+AT SELECTION-SCREEN.
+  PERFORM f_check_matnr.
+  PERFORM f_check_prueflos.
+  PERFORM f_check_vbeln.
+  PERFORM f_check_vkorg.
+
+START-OF-SELECTION.
+ PERFORM f_get_data.
+IF gt_output IS NOT INITIAL.
+  PERFORM f_alv_display.
+ ENDIF.
+
+
+*&---------------------------------------------------------------------*
+*&  Include           ZPPRINCPALLETS_TOP
+*&---------------------------------------------------------------------*
+
+DATA: gv_matnr     TYPE mara-matnr,
+      gv_enstehdat TYPE qals-enstehdat,
+      gv_prueflos  TYPE  qals-prueflos,
+      gv_vbeln     TYPE vbuk-vbeln,
+      gv_vkorg     TYPE tvko-vkorg.
+
+TYPES: BEGIN OF ty_out,
+         checkbox  TYPE sap_bool,            "Row select
+         exidv     TYPE vekp-exidv,          "HU Box
+         exidv2    TYPE vekp-exidv2,         "HU Identification (Alt)
+         maktx     TYPE maktx,               "Material description (MAKT)
+         prueflos  TYPE qals-prueflos,       "Inspection Lot
+         enstehdat TYPE qals-enstehdat,      "Inspection Lot Date
+         matnr     TYPE matnr,               "Material
+         charg     TYPE charg_d,             "Batch
+         vkorg     TYPE vkorg,               "Sales Org
+         losmenge  TYPE qals-losmenge,       "Inspection Lot Quantity
+         posting   TYPE char20,              "Unrestricted / Scrap
+         drdn_hdl  TYPE i,
+         plant     TYPE werks_d,
+         strg_loc  TYPE lgort_d,
+         uom       TYPE meins,
+       END OF ty_out.
+
+DATA: gt_output TYPE STANDARD TABLE OF ty_out,
+      gs_output TYPE ty_out.
+DATA: gt_fcat TYPE lvc_t_fcat,
+      gs_fcat TYPE lvc_s_fcat,
+      gs_layo TYPE lvc_s_layo,
+      go_cont TYPE REF TO cl_gui_custom_container,
+      go_grid TYPE REF TO cl_gui_alv_grid.
+
+
+DATA: lt_dral TYPE lvc_t_dral,                              "#EC NEEDED
+      ls_dral TYPE lvc_s_dral.                              "#EC NEEDED
+
+DATA: ls_ud_data            TYPE bapi2045ud,
+      lv_langu              TYPE bapi2045la,
+      lt_sys_stat           TYPE STANDARD TABLE OF bapi2045ss,
+      lt_usr_stat           TYPE STANDARD TABLE OF bapi2045us,
+      ls_return             TYPE bapireturn1,
+      lv_ud_return_data     TYPE bapi2045ud_return ##NEEDED,
+      lv_stock_data         TYPE bapi2045d_il2 ##NEEDED,
+      gv_number             TYPE qplos,
+      general_data          TYPE bapi2045d_il0 ##NEEDED,
+      task_list_data        TYPE bapi2045d_il1 ##NEEDED,
+      stock_data            TYPE bapi2045d_il2 ##NEEDED,
+      accounting_data       TYPE bapi2045d_il3 ##NEEDED,
+      usage_decision_data   TYPE bapi2045d_il4,
+      customer_include_data TYPE bapi2045ci ##NEEDED,
+      return_detail         TYPE bapireturn1 ##NEEDED,
+      system_status         TYPE STANDARD TABLE OF  bapi2045ss,
+      user_status           TYPE STANDARD TABLE OF  bapi2045us,
+      material_documents    TYPE STANDARD TABLE OF bapi2045md.
+
+TYPES: BEGIN OF ty_err,
+         id      TYPE qplos,
+         message TYPE string,
+       END OF ty_err.
+TYPES: ty_err_tab TYPE STANDARD TABLE OF ty_err WITH EMPTY KEY.
+
+TYPES: BEGIN OF ty_success_sel,
+         sign   TYPE sign,
+         option TYPE ddoption,
+         low    TYPE qals-prueflos,
+         high   TYPE qals-prueflos,
+       END OF ty_success_sel.
+
+TYPES: ty_success_tab TYPE STANDARD TABLE OF ty_success_sel WITH EMPTY KEY.
+
+DATA: lt_success TYPE ty_success_tab,
+      lt_err     TYPE  ty_err_tab,
+      ls_err     TYPE ty_err.
+
+DATA : lv_matdoc TYPE  bapi2017_gm_head_ret-mat_doc,
+       lv_matyr  TYPE  bapi2017_gm_head_ret-doc_year.
+
+DATA :  ls_goodsmvt_header TYPE bapi2017_gm_head_01,
+        ls_gm_code         TYPE bapi2017_gm_code. " DATA lv_gm_code TYPE gm_code.
+DATA: lt_goodsmvt_item TYPE TABLE OF bapi2017_gm_item_create,
+      ls_goodsmvt_item TYPE bapi2017_gm_item_create,
+      lt_return2       TYPE TABLE OF bapiret2,
+      ls_return2       TYPE bapiret2,
+      gv_udcode        TYPE qvcode.
+DATA : lv_checkbox          TYPE lvc_fname VALUE 'CHECKBOX',
+       lv_matnr             TYPE lvc_fname VALUE 'MATNR',
+       lv_maktx             TYPE lvc_fname VALUE 'MAKTX',
+       lv_vkorg             TYPE lvc_fname VALUE 'VKORG',
+       lv_charg             TYPE lvc_fname VALUE 'CHARG',
+       lv_prueflos          TYPE lvc_fname VALUE 'PRUEFLOS',
+       lv_exidv2            TYPE lvc_fname VALUE 'EXIDV2',
+       lv_exidv             TYPE lvc_fname VALUE 'EXIDV',
+       lv_enstehdat         TYPE lvc_fname VALUE 'ENSTEHDAT',
+       lv_losmenge          TYPE lvc_fname VALUE 'LOSMENGE',
+       lv_posting           TYPE lvc_fname VALUE 'POSTING',
+       lv_drdn_hdl          TYPE lvc_fname VALUE 'DRDN_HDL',
+       lt_harranges_art     TYPE  TABLE OF hrranges,
+       lt_harranges_plant   TYPE  TABLE OF hrranges,
+       lt_harranges_selset  TYPE  TABLE OF hrranges,
+       lt_harranges_udcode  TYPE  TABLE OF hrranges,
+       lt_harranges_udcode2 TYPE  TABLE OF hrranges,
+       lt_harranges_udgrp   TYPE  TABLE OF hrranges.
+
+CONSTANTS: gc_type_e           TYPE string VALUE 'E',
+           gc_type_a           TYPE string VALUE 'A',
+           gc_alpha            TYPE convexit VALUE 'ALPHA',
+           gc_x                TYPE char1 VALUE 'X',
+           gc_1                TYPE char1 VALUE '1',
+           gc_i                TYPE sign VALUE 'I',
+           gc_eq               TYPE ddoption VALUE 'EQ',
+           gc_progname         TYPE progname VALUE 'ZPPRINCOMPALLETS',
+           gc_s                TYPE rsscr_kind VALUE 'S',
+           gc_custret_art      TYPE rvari_vnam VALUE 'CUSTRET_ART',
+           gc_custret_plant    TYPE rvari_vnam VALUE 'CUSTRET_PLANT',
+           gc_custret_selset   TYPE rvari_vnam VALUE 'CUSTRET_SELSET',
+           gc_custret_udcode_a TYPE rvari_vnam VALUE 'CUSTRET_UDCODE_A',
+           gc_custret_udcode_r TYPE rvari_vnam VALUE 'CUSTRET_UDCODE_R',
+           gc_custret_udgrp    TYPE rvari_vnam VALUE 'CUSTRET_UDGRP',
+           gc_udforcecom       TYPE qinsp_can VALUE 'X',
+           gc_udstlpost        TYPE qstock_pst VALUE 'X'.
+CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+  EXPORTING
+    i_progname      = gc_progname
+    i_name          = gc_custret_art
+    i_type          = gc_s
+  TABLES
+    it_hrranges     = lt_harranges_art
+  EXCEPTIONS
+    wrong_type      = 1
+    wrong_value     = 2
+    inchoerent_type = 3
+    OTHERS          = 4.
+IF sy-subrc = 0.
+  SORT : lt_harranges_art BY low.
+ENDIF.
+
+CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+  EXPORTING
+    i_progname      = gc_progname
+    i_name          = gc_custret_plant
+    i_type          = gc_s
+  TABLES
+    it_hrranges     = lt_harranges_plant
+  EXCEPTIONS
+    wrong_type      = 1
+    wrong_value     = 2
+    inchoerent_type = 3
+    OTHERS          = 4.
+IF sy-subrc = 0.
+  SORT : lt_harranges_plant BY low.
+ENDIF.
+
+CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+  EXPORTING
+    i_progname      = gc_progname
+    i_name          = gc_custret_selset
+    i_type          = gc_s
+  TABLES
+    it_hrranges     = lt_harranges_selset
+  EXCEPTIONS
+    wrong_type      = 1
+    wrong_value     = 2
+    inchoerent_type = 3
+    OTHERS          = 4.
+IF sy-subrc = 0.
+  SORT : lt_harranges_selset BY low.
+  DATA(gv_selset) = VALUE #( lt_harranges_selset[ 1 ]-low OPTIONAL ).
+ENDIF.
+
+CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+  EXPORTING
+    i_progname      = gc_progname
+    i_name          = gc_custret_udcode_a
+    i_type          = gc_s
+  TABLES
+    it_hrranges     = lt_harranges_udcode
+  EXCEPTIONS
+    wrong_type      = 1
+    wrong_value     = 2
+    inchoerent_type = 3
+    OTHERS          = 4.
+IF sy-subrc = 0.
+  SORT : lt_harranges_udcode BY low.
+  DATA(gv_unrestricted) = VALUE #( lt_harranges_udcode[ 1 ]-low OPTIONAL ).
+ENDIF.
+
+CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+  EXPORTING
+    i_progname      = gc_progname
+    i_name          = gc_custret_udcode_r
+    i_type          = gc_s
+  TABLES
+    it_hrranges     = lt_harranges_udcode2
+  EXCEPTIONS
+    wrong_type      = 1
+    wrong_value     = 2
+    inchoerent_type = 3
+    OTHERS          = 4.
+IF sy-subrc = 0.
+  SORT : lt_harranges_udcode2 BY low.
+  DATA(gv_scrap) = VALUE #( lt_harranges_udcode2[ 1 ]-low OPTIONAL ).
+ENDIF.
+
+CALL FUNCTION 'ZXUN_GET_PARAM_YSVARV'
+  EXPORTING
+    i_progname      = gc_progname
+    i_name          = gc_custret_udgrp
+    i_type          = gc_s
+  TABLES
+    it_hrranges     = lt_harranges_udgrp
+  EXCEPTIONS
+    wrong_type      = 1
+    wrong_value     = 2
+    inchoerent_type = 3
+    OTHERS          = 4.
+IF sy-subrc = 0.
+  SORT : lt_harranges_udgrp BY low.
+  DATA(gv_udgrp) = VALUE #( lt_harranges_udgrp[ 1 ]-low OPTIONAL ).
+ENDIF.
+
+
+
+IF go_cont IS INITIAL.
+  CREATE OBJECT go_cont
+    EXPORTING
+      container_name = 'GT_CONT'.
+
+  CREATE OBJECT go_grid
+    EXPORTING
+      i_parent = go_cont.
+ENDIF.
+CLEAR ls_dral.
+ls_dral-handle = gc_1.
+ls_dral-value = text-024.
+APPEND ls_dral TO lt_dral.
+CLEAR ls_dral.
+ls_dral-handle = gc_1.
+ls_dral-value = text-025.
+APPEND ls_dral TO lt_dral.
+
+go_grid->set_drop_down_table( it_drop_down_alias = lt_dral ).
+
+
+*&---------------------------------------------------------------------*
+*&  Include           ZPPRINCPALLETS_SEL
+*&---------------------------------------------------------------------*
+
+SELECTION-SCREEN BEGIN OF BLOCK a1 WITH FRAME TITLE text-001.
+SELECT-OPTIONS: s_matnr   FOR gv_matnr,
+                s_credt FOR gv_enstehdat,
+                s_insno FOR  gv_prueflos NO INTERVALS NO-EXTENSION,
+                s_vbeln FOR  gv_vbeln NO INTERVALS NO-EXTENSION,
+                s_vkorg FOR gv_vkorg NO INTERVALS NO-EXTENSION OBLIGATORY.
+SELECTION-SCREEN END OF BLOCK a1.
+
+
+*&---------------------------------------------------------------------*
+*&  Include           ZPPRINCPALLETS_FORMS
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  F_CHECK_MATNR
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+
+FORM f_check_matnr .
+  SELECT matnr
+    FROM mara
+    INTO TABLE @DATA(lt_mara)
+   WHERE matnr IN @s_matnr.
+  LOOP AT s_matnr INTO DATA(ls_matnr).
+    IF ls_matnr-low IS NOT INITIAL.
+      READ TABLE lt_mara WITH KEY matnr = ls_matnr-low TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        MESSAGE text-012 TYPE gc_type_e.
+      ENDIF.
+    ENDIF.
+
+    IF ls_matnr-high IS NOT INITIAL.
+      READ TABLE lt_mara WITH KEY matnr = ls_matnr-high TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        MESSAGE text-012 TYPE gc_type_e.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  F_CHECK_PRUEFLOS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f_check_prueflos .
+  IF s_insno IS NOT INITIAL.
+    SELECT SINGLE prueflos
+      FROM qals
+      INTO @DATA(lv_prueflos)
+     WHERE prueflos IN @s_insno.
+
+    IF sy-subrc <> 0.
+      MESSAGE text-013 TYPE gc_type_e.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_CHECK_VBELN
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f_check_vbeln .
+  IF s_vbeln IS NOT INITIAL.
+    SELECT SINGLE vbeln
+      FROM vbuk
+      INTO @DATA(lv_vbeln)
+     WHERE vbeln IN @s_vbeln.
+
+    IF sy-subrc <> 0.
+      MESSAGE  text-014 TYPE gc_type_e.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_CHECK_VKORG
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f_check_vkorg .
+  IF s_vkorg IS NOT INITIAL.
+    SELECT SINGLE vkorg
+      FROM tvko
+      INTO @DATA(lv_vkorg)
+     WHERE vkorg IN @s_vkorg.
+
+    IF sy-subrc <> 0.
+      MESSAGE text-015 TYPE gc_type_e.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f_get_data .
+  REFRESH gt_output.
+  SELECT prueflos,
+         werk,
+         art,
+         stat35,
+         enstehdat,
+         matnr,
+         charg,
+         lagortchrg,
+         ls_vbeln,
+         ls_vkorg,
+         losmenge,
+         einhprobe FROM qals INTO TABLE @DATA(lt_qals)
+         WHERE  prueflos IN @s_insno
+         AND matnr IN @s_matnr
+         AND enstehdat IN @s_credt
+         AND ls_vbeln IN @s_vbeln
+         AND ls_vkorg IN @s_vkorg
+         AND art IN @lt_harranges_art
+         AND werk IN @lt_harranges_plant
+         AND stat35 = @space.
+
+  IF sy-subrc = 0 AND lt_qals IS NOT INITIAL.
+    SORT: lt_qals BY prueflos.
+    SELECT venum,
+           vepos,
+           qplos FROM vepo INTO TABLE @DATA(lt_vepo)
+           FOR ALL ENTRIES IN @lt_qals
+           WHERE qplos =  @lt_qals-prueflos.
+
+    IF sy-subrc = 0 AND lt_vepo IS NOT INITIAL.
+      SORT lt_vepo BY venum.
+      SELECT venum,
+             exidv,
+             exidv2 FROM vekp INTO TABLE @DATA(lt_vekp)
+             FOR ALL ENTRIES IN @lt_vepo
+             WHERE venum = @lt_vepo-venum.
+      SORT lt_vekp BY venum.
+    ENDIF.
+
+    SORT: lt_qals BY matnr.
+    SELECT matnr,
+           spras,
+           maktx FROM makt INTO TABLE @DATA(lt_makt)
+           FOR ALL ENTRIES IN @lt_qals
+           WHERE matnr = @lt_qals-matnr
+           AND spras = @sy-langu.
+    IF sy-subrc = 0.
+      SORT: lt_makt BY matnr.
+    ENDIF.
+  ELSE .
+    MESSAGE text-023 TYPE gc_type_e.
+  ENDIF.
+
+  SORT: lt_vepo BY qplos.
+  LOOP AT lt_qals INTO DATA(ls_qals).
+    READ TABLE lt_vepo INTO DATA(ls_vepo)
+        WITH KEY qplos = ls_qals-prueflos
+        BINARY SEARCH.
+    IF sy-subrc = 0.
+      READ TABLE lt_vekp INTO DATA(ls_vekp)
+          WITH KEY venum = ls_vepo-venum
+          BINARY SEARCH.
+      IF sy-subrc = 0.
+        gs_output-exidv     = ls_vekp-exidv.
+        gs_output-exidv2    = ls_vekp-exidv2.
+      ENDIF.
+    ENDIF.
+    READ TABLE lt_makt INTO DATA(ls_makt)
+          WITH KEY matnr = ls_qals-matnr
+          BINARY SEARCH.
+    IF sy-subrc = 0.
+      gs_output-maktx     = ls_makt-maktx.
+    ENDIF.
+
+    gs_output-prueflos  = ls_qals-prueflos.
+    gs_output-enstehdat = ls_qals-enstehdat.
+    gs_output-matnr     = ls_qals-matnr.
+    gs_output-charg     = ls_qals-charg.
+    gs_output-vkorg     = ls_qals-ls_vkorg.
+    gs_output-losmenge  = ls_qals-losmenge.
+    gs_output-posting   = space.
+    gs_output-drdn_hdl = 1.
+    gs_output-plant    = ls_qals-werk.
+    gs_output-strg_loc  = ls_qals-lagortchrg.
+    gs_output-uom    =   ls_qals-einhprobe.
+    APPEND gs_output TO gt_output.
+    CLEAR: gs_output.
+  ENDLOOP.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_ALV_DISPLAY
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f_alv_display .
+  PERFORM f_get_fieldcat.
+  CALL SCREEN 100.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0100  OUTPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'ZPF_STAT' EXCLUDING 'MENUBAR'.
+*  SET TITLEBAR 'xxx'.
+  IF gt_output IS NOT INITIAL.
+    PERFORM f_get_layout.
+    PERFORM f_display_data.
+  ENDIF.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0100 INPUT.
+
+  IF go_grid IS BOUND.
+    go_grid->check_changed_data( ).
+  ENDIF.
+
+  CASE sy-ucomm.
+    WHEN 'SAVE'.
+      PERFORM f__setusagedecision.
+    WHEN 'BACK'.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_FIELDCAT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f_get_fieldcat .
+
+  REFRESH gt_fcat.
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_checkbox.
+  gs_fcat-checkbox  = abap_true.
+  gs_fcat-edit      = abap_true.
+  gs_fcat-scrtext_m = text-020.
+  gs_fcat-col_pos   = 1.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_matnr.
+  gs_fcat-scrtext_m = text-003.
+  gs_fcat-col_pos   = 2.
+  gs_fcat-convexit  = gc_alpha.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_maktx.
+  gs_fcat-scrtext_m = text-004.
+  gs_fcat-col_pos   = 3.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_vkorg.
+  gs_fcat-scrtext_m = text-002.
+  gs_fcat-col_pos   = 4.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_charg.
+  gs_fcat-scrtext_m = text-005.
+  gs_fcat-col_pos   = 5.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_prueflos.
+  gs_fcat-scrtext_m = text-006.
+  gs_fcat-col_pos   = 6.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_exidv2.
+  gs_fcat-scrtext_m = text-007.
+  gs_fcat-col_pos   = 7.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_exidv.
+  gs_fcat-scrtext_m = text-008.
+  gs_fcat-col_pos   = 8.
+  gs_fcat-convexit  = gc_alpha.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_enstehdat.
+  gs_fcat-scrtext_m = text-009.
+  gs_fcat-col_pos   = 9.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_losmenge.
+  gs_fcat-scrtext_m = text-010.
+  gs_fcat-col_pos   = 10.
+  APPEND gs_fcat TO gt_fcat.
+
+  CLEAR gs_fcat.
+  gs_fcat-fieldname = lv_posting.
+  gs_fcat-scrtext_m = text-011.
+  gs_fcat-col_pos   = 11.
+  gs_fcat-edit      = abap_true.
+  gs_fcat-drdn_field = lv_drdn_hdl.
+  gs_fcat-drdn_hndl  = 1.
+  APPEND gs_fcat TO gt_fcat.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_LAYOUT
+*&---------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f_get_layout .
+
+  CLEAR gs_layo.
+  gs_layo-zebra      = abap_true.
+  gs_layo-grid_title = text-021.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_DISPLAY_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f_display_data .
+  CALL METHOD go_grid->set_table_for_first_display
+    EXPORTING
+      is_layout       = gs_layo
+    CHANGING
+      it_outtab       = gt_output
+      it_fieldcatalog = gt_fcat.
+  IF sy-subrc <> 0.
+    MESSAGE text-022 TYPE gc_type_e.
+  ENDIF.
+
+  go_grid->set_ready_for_input( i_ready_for_input = 1 ).
+  go_grid->register_edit_event( i_event_id = cl_gui_alv_grid=>mc_evt_modified ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F__SETUSAGEDECISION
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f__setusagedecision .
+
+  LOOP AT gt_output ASSIGNING FIELD-SYMBOL(<ls_chk>) WHERE checkbox = abap_true.
+    IF <ls_chk>-posting IS INITIAL.
+      MESSAGE text-016 TYPE gc_type_e.
+    ENDIF.
+  ENDLOOP.
+
+  LOOP AT gt_output ASSIGNING FIELD-SYMBOL(<ls_row>) WHERE checkbox = abap_true.
+
+    CASE <ls_row>-posting.
+      WHEN text-024. "Unrestricted
+        gv_udcode = gv_unrestricted.
+      WHEN text-025. "Scrap
+        gv_udcode = gv_scrap.
+    ENDCASE.
+
+
+    CLEAR: general_data,
+           task_list_data,
+           stock_data,
+           accounting_data,
+           usage_decision_data,
+           customer_include_data,
+           return_detail,
+           system_status,
+           user_status,
+           material_documents,
+           ls_ud_data,
+           lv_langu,
+           ls_return,
+           lv_ud_return_data,
+           lv_stock_data,
+           lv_stock_data,
+           lt_sys_stat,
+           lt_usr_stat.
+
+
+    gv_number = <ls_row>-prueflos.
+    ls_ud_data-insplot              = gv_number.
+    ls_ud_data-ud_selected_set      = gv_selset.
+    ls_ud_data-ud_plant             = <ls_row>-plant.
+    ls_ud_data-ud_code_group        = gv_udgrp.
+    ls_ud_data-ud_code              = gv_udcode.
+    ls_ud_data-ud_force_completion  = gc_udforcecom.
+    ls_ud_data-ud_stock_posting     = gc_udstlpost.
+
+
+    CALL FUNCTION 'BAPI_INSPLOT_SETUSAGEDECISION'
+      EXPORTING
+        number         = gv_number
+        ud_data        = ls_ud_data
+        language       = lv_langu
+      IMPORTING
+        return         = ls_return
+        ud_return_data = lv_ud_return_data
+        stock_data     = lv_stock_data
+      TABLES
+        system_status  = lt_sys_stat
+        user_status    = lt_usr_stat.
+
+    DATA(lv_has_error) = abap_false.
+
+    IF ls_return-type = gc_type_e OR ls_return-type = gc_type_a.
+      lv_has_error = abap_true.
+    ENDIF.
+    IF lv_has_error = abap_true.
+      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+
+      ls_err-id = gv_number.
+      ls_err-message = ls_return-message.
+      APPEND ls_err TO lt_err.
+      CLEAR ls_err.
+
+    ELSE.
+      CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+        EXPORTING
+          wait = gc_x.
+      APPEND VALUE ty_success_sel(
+               sign   = gc_I
+               option = gc_eq
+               low    = gv_number
+               high   = gv_number
+             ) TO lt_success.
+
+      CLEAR:gv_number.
+    ENDIF.
+
+  ENDLOOP.
+  " Remove duplicates
+  IF lt_success IS NOT INITIAL.
+    SORT lt_success BY low.
+    DELETE ADJACENT DUPLICATES FROM lt_success COMPARING low.
+  ENDIF.
+
+  IF lt_err IS NOT INITIAL.
+    SORT lt_err BY id message.
+    DELETE ADJACENT DUPLICATES FROM lt_err COMPARING id message.
+  ENDIF.
+
+  IF lt_success IS NOT INITIAL.
+    DELETE gt_output WHERE prueflos IN lt_success.
+    DATA(ls_stbl) = VALUE lvc_s_stbl( row = abap_true col = abap_true ).
+    IF go_grid IS BOUND.
+      go_grid->refresh_table_display( EXPORTING is_stable = ls_stbl ).
+    ENDIF.
+  ENDIF.
+  PERFORM f_show_summary USING lt_success lt_err.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_SHOW_SUMMARY
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->P_LT_SUCCESS  text
+*      -->P_LT_ERR  text
+*----------------------------------------------------------------------*
+FORM f_show_summary  USING
+                          it_success TYPE  ty_success_tab
+                          it_err     TYPE  ty_err_tab.
+
+  LEAVE TO LIST-PROCESSING AND RETURN TO SCREEN 100.
+  NEW-PAGE.
+  WRITE: / text-019, /.
+
+  WRITE: / text-018.
+  LOOP AT it_success ASSIGNING FIELD-SYMBOL(<ls_success>).
+    WRITE: / | { text-027 } { <ls_success>-low } { text-026 } |.
+  ENDLOOP.
+  SKIP.
+  WRITE: / text-017.
+  LOOP AT it_err ASSIGNING FIELD-SYMBOL(<ls_error>).
+    WRITE: / |{ text-027 } { <ls_error>-id } { text-028 } { <ls_error>-message }|.
+  ENDLOOP.
+ENDFORM.
