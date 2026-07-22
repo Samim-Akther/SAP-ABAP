@@ -1,0 +1,25 @@
+{
+    "github.copilot.nextEditSuggestions.enabled": true,
+    "editor.unicodeHighlight.invisibleCharacters": false,
+    "abapfs.remote": {
+         "S9F": {
+            "url": "http://in-blr-ibx2.corp.capgemini.com:8000",
+/*
+SCIF ->SAP->ODATA->SAP->ADT
+*/
+            "username": "TRAINEE354",
+            "password": "Welcome123$",
+            "client": "100",
+            "language": "en",
+            "allowSelfSigned": true,
+        }   
+    },
+    "abapfs.feedSubscriptions": {
+
+    },
+    "abapfs.cleaner": {
+        
+
+
+    }
+}
