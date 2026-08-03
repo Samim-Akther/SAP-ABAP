@@ -3,3 +3,1192 @@ tcode fb03 and bseg and bsme tables
 for that created a z program from scratch , there method ,1 testing for review 
 second for process to log table and 3rd for reporcess those failed recoeds in the log table
 alv , and log table and tcodes update 
+
+
+1st one was upload program a excel will be upload and it will store the date in a ztable :
+*&---------------------------------------------------------------------*
+*& Report ZS4_IVGE_STD_COL
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+* Author      : Samim Akther
+* Date        : 22/06/2026
+* RICEFW ID   : GAPMD063
+*&---------------------------------------------------------------------*
+REPORT zs4_ivge_std_col.
+
+INCLUDE zs4_ivge_std_col_top.
+INCLUDE zs4_ivge_std_col_sel.
+INCLUDE zs4_ivge_std_col_cls.
+
+*---------------------------------------------------------------------*
+* Initialization
+*---------------------------------------------------------------------*
+INITIALIZATION.
+  DATA(go_main) = NEW lcl_main( ).
+  go_main->init( ).
+
+*---------------------------------------------------------------------*
+* Selection-screen function handling
+*---------------------------------------------------------------------*
+AT SELECTION-SCREEN.
+  CASE  sscrfields-ucomm.
+    WHEN gc_fc_exp.
+      go_main->export_file( ).
+      LEAVE LIST-PROCESSING.
+
+    WHEN gc_fc_imp.
+      go_main->import_file( ).
+      LEAVE LIST-PROCESSING.
+  ENDCASE.
+
+START-OF-SELECTION.
+  go_main->run( ).
+
+
+=========================
+
+
+*&---------------------------------------------------------------------*
+*& Include          ZS4_IVGE_STD_COL_TOP
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+* Author      : Samim Akther
+* Date        : 22/06/2026
+* RICEFW ID   : GAPMD063
+*&---------------------------------------------------------------------*
+TABLES : sscrfields.
+*---------------------------------------------------------------------*
+* Types
+*---------------------------------------------------------------------*
+TYPES: ty_t_file TYPE STANDARD TABLE OF zs4_ivge_st_std_inv WITH DEFAULT KEY.
+
+TYPES: BEGIN OF ty_log,
+         row_id     TYPE i,
+         icon       TYPE icon_d,
+         werks      TYPE werks_d,
+         gjahr      TYPE gjahr,
+         versione   TYPE zs4_con_del_vers,
+         color_code TYPE zs4_ivge_fi_dtel_colcod,
+         medio      TYPE zs4_ivge_de_medio,
+         type       TYPE bapi_mtype,
+         message    TYPE bapi_msg,
+       END OF ty_log.
+TYPES: ty_t_log TYPE STANDARD TABLE OF ty_log WITH DEFAULT KEY.
+
+
+*---------------------------------------------------------------------*
+* Global Data
+*---------------------------------------------------------------------*
+CONSTANTS:
+  gc_fc_exp      TYPE syucomm VALUE 'FC01',
+  gc_fc_imp      TYPE syucomm VALUE 'FC02',
+
+  gc_act_display TYPE activ_auth VALUE '03',
+  gc_act_change  TYPE activ_auth VALUE '02',
+
+  gc_file_ext    TYPE string VALUE '*.xlsx',
+  gc_filetype    TYPE char10 VALUE 'BIN',
+  gc_max_rows    TYPE i VALUE 50000,
+
+  gc_row_type    TYPE tabname VALUE 'ZS4_IVGE_ST_STD_INV',
+
+  gc_e           TYPE char1         VALUE 'E',
+  gc_s           TYPE char1         VALUE 'S',
+  gc_i           TYPE char1         VALUE 'I',
+  gc_0           TYPE char1         VALUE '0',
+
+  gc_m_mate_wrk  TYPE xuobject                  VALUE 'M_MATE_WRK',
+  gc_werks       TYPE fieldname                 VALUE 'WERKS',
+  gc_actvt       TYPE fieldname                 VALUE 'ACTVT'.
+
+*---------------------------------------------------------------------*
+* Local Class
+*---------------------------------------------------------------------*
+CLASS lcl_main DEFINITION FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      init,
+      run,
+      export_file,
+      import_file.
+
+  PRIVATE SECTION.
+    METHODS:
+      authority_check
+        IMPORTING
+                  iv_actvt        TYPE activ_auth
+        RETURNING VALUE(rv_error) TYPE abap_bool,
+
+      get_data
+        RETURNING VALUE(rt_data) TYPE ty_t_file,
+
+      display_data
+        IMPORTING
+          it_data TYPE ty_t_file,
+
+      display_log
+        IMPORTING
+          it_log TYPE ty_t_log,
+
+      download_file
+        IMPORTING
+          it_file TYPE ty_t_file,
+
+      upload_file
+        RETURNING VALUE(rt_file) TYPE ty_t_file,
+
+      validate_and_save
+        IMPORTING
+                  it_file       TYPE ty_t_file
+        RETURNING VALUE(rt_log) TYPE ty_t_log.
+ENDCLASS.
+
+==========================
+
+*&---------------------------------------------------------------------*
+*& Include          ZS4_IVGE_STD_COL_SEL
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+* Author      : Samim Akther
+* Date        : 22/06/2026
+* RICEFW ID   : GAPMD063
+*&---------------------------------------------------------------------*
+*---------------------------------------------------------------------*
+* Selection Screen
+*---------------------------------------------------------------------*
+SELECTION-SCREEN FUNCTION KEY 1.
+SELECTION-SCREEN FUNCTION KEY 2.
+
+SELECTION-SCREEN BEGIN OF BLOCK blck1 WITH FRAME TITLE TEXT-001.
+  PARAMETERS:
+    p_werks TYPE werks_d OBLIGATORY,
+    p_gjahr TYPE gjahr   OBLIGATORY,
+    p_vers  TYPE zs4_con_del_vers,
+    p_color TYPE zs4_ivge_fi_dtel_colcod,
+    p_medio TYPE zs4_ivge_de_medio.
+SELECTION-SCREEN END OF BLOCK blck1.
+
+
+=================================
+
+zclass-> 
+
+
+class ZS4_IVGE_CL_GEN_FILE definition
+  public
+  create public .
+
+public section.
+  type-pools ABAP .
+  type-pools OLE2 .
+  type-pools TRUXS .
+
+  class-methods COPY_PC_TO_SERVER
+    importing
+      !ID_SOURCE type STRING
+      !ID_DEST type STRING
+    exceptions
+      UPLOAD_FILE_ERROR
+      DOWNLOAD_FILE_ERROR .
+  class-methods COPY_SERVER
+    importing
+      !ID_FILE_SRC type STRING
+      !ID_FILE_DEST type STRING
+      !ID_SOURCE_DELETE type XFELD default ABAP_FALSE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods COPY_SERVER_TO_PC
+    importing
+      !ID_SOURCE type STRING
+      !ID_DEST type STRING
+    exceptions
+      UPLOAD_FILE_ERROR
+      DOWNLOAD_FILE_ERROR .
+  class-methods DOWNLOAD_PC
+    importing
+      !ID_FILE type STRING
+      !ID_FILE_TYPE type CHAR10 default 'ASC'
+    exporting
+      !ET_DATI type STANDARD TABLE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods DOWNLOAD_PC_CSV
+    importing
+      !ID_FILE type STRING
+    exporting
+      !ET_DATI type STANDARD TABLE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods DOWNLOAD_SERVER
+    importing
+      !ID_FILE type STRING
+      !IT_DATI type STANDARD TABLE
+      !ID_APPENDING type XFELD default ABAP_FALSE
+      !ID_LENGHT type INT4 optional
+      !ID_NO_END type XFELD default ABAP_FALSE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods DOWNLOAD_SERVER_BIN
+    importing
+      !ID_FILE type STRING
+      !IT_DATI type STANDARD TABLE
+      !ID_APPENDING type XFELD default ABAP_FALSE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods DOWNLOAD_SERVER_ZIP
+    importing
+      !ID_FILE_ZIP type STRING
+      !ID_SIZE type I optional
+      !IT_DATI type STANDARD TABLE
+      !ID_APPENDING type XFELD default ABAP_FALSE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods F4_FILENAME
+    importing
+      !ID_PRESENTATION type XFELD default ABAP_TRUE
+    returning
+      value(RD_FILENAME) type STRING .
+  class-methods UPLOAD_PC
+    importing
+      !ID_FILE type STRING
+      !ID_TYPE type CHAR10 optional
+    exporting
+      !ET_DATI type STANDARD TABLE
+      !ED_SIZE type I
+    raising
+      CX_DV_EXCEPTION .
+  class-methods UPLOAD_PC_CSV
+    importing
+      !ID_FILE type STRING
+      !ID_FIELD_SEPERATOR type CHAR01 default ';'
+      !ID_LINE_HEADER type CHAR01 default ABAP_TRUE
+    exporting
+      !ET_DATI type STANDARD TABLE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods UPLOAD_SERVER
+    importing
+      !ID_FILE type STRING
+      !IV_NON_UNICODE type XFELD optional
+    exporting
+      !ET_DATI type STANDARD TABLE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods UPLOAD_SERVER_BIN
+    importing
+      !ID_FILE type STRING
+    exporting
+      !ET_DATI type STANDARD TABLE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods UPLOAD_XLS_FROM_PC
+    importing
+      !ID_FILE type LOCALFILE
+      !ID_ROW_TYPE type TABNAME
+      !ID_HEADER type XFELD default ABAP_FALSE
+      !ID_ROWS type SYTABIX default 10000
+    exporting
+      !ET_TAB type STANDARD TABLE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods COPY_SERVER_BIN
+    importing
+      !ID_FILE_SRC type STRING
+      !ID_FILE_DEST type STRING
+      !ID_SOURCE_DELETE type XFELD default ABAP_FALSE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods UPLOAD_CSV_FROM_PC
+    importing
+      !ID_FILE type LOCALFILE
+      !ID_ROW_TYPE type TABNAME
+      !ID_HEADER type XFELD default ABAP_FALSE
+      !ID_SEPARATOR type SEPARATOR default ';'
+    exporting
+      !ET_DATI type STANDARD TABLE
+    raising
+      CX_DV_EXCEPTION .
+  class-methods UPLOAD_CSV_FROM_SERVER
+    importing
+      !ID_FILE type STRING
+      !IV_NON_UNICODE type XFELD optional
+      !ID_ROW_TYPE type TABNAME
+      !ID_HEADER type XFELD default ABAP_FALSE
+      !ID_SEPARATOR type SEPARATOR default ';'
+    exporting
+      !ET_DATI type STANDARD TABLE
+    raising
+      CX_DV_EXCEPTION .
+
+---private section ->
+
+private section.
+
+  constants FILE_TYPE type CHAR10 value 'ASC' ##NO_TEXT.
+  class-data DUMMY type STRING .
+
+-----
+
+  METHOD copy_pc_to_server.
+
+    DATA: ld_mess TYPE char100.
+    DATA: lt_dati TYPE STANDARD TABLE OF string.
+
+    TRY.
+        CALL METHOD ZS4_IVGE_CL_GEN_FILE=>upload_pc
+          EXPORTING
+            id_file = id_source
+            id_type = 'BIN'
+          IMPORTING
+            et_dati = lt_dati.
+      CATCH cx_dv_exception INTO DATA(exc).
+        RAISE upload_file_error.
+    ENDTRY.
+
+    TRY.
+        CALL METHOD ZS4_IVGE_CL_GEN_FILE=>download_server_bin(
+          EXPORTING
+            id_file = id_dest
+            it_dati = lt_dati ).
+      CATCH cx_dv_exception INTO exc.
+        RAISE download_file_error.
+    ENDTRY.
+
+    CONCATENATE 'Copia' 'file' 'OK' INTO ld_mess SEPARATED BY space .
+    MESSAGE s002(sy) WITH ld_mess.
+
+
+  ENDMETHOD.
+
+
+  METHOD copy_server.
+
+    DATA lt TYPE STANDARD TABLE OF string.
+
+    TRY.
+        ZS4_IVGE_CL_GEN_FILE=>upload_server(
+          EXPORTING
+            id_file = id_file_src
+          IMPORTING
+            et_dati = lt[] ).
+      CATCH cx_dv_exception INTO DATA(lo_exc).
+        cx_dv_exception=>raise_from_message( ).
+    ENDTRY.
+
+    TRY.
+        ZS4_IVGE_CL_GEN_FILE=>download_server(
+          EXPORTING
+            id_file = id_file_dest
+            it_dati = lt[] ).
+      CATCH cx_dv_exception INTO lo_exc.
+        cx_dv_exception=>raise_from_message( ).
+    ENDTRY.
+
+    IF id_source_delete = abap_true.
+      DELETE DATASET id_file_src.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD copy_server_to_pc.
+
+    DATA: ld_mess TYPE char100.
+    DATA: lt_dati TYPE STANDARD TABLE OF string.
+
+    TRY.
+        ZS4_IVGE_CL_GEN_FILE=>upload_server_bin(
+          EXPORTING
+            id_file = id_source
+          IMPORTING
+            et_dati = lt_dati[] ) .
+
+      CATCH cx_dv_exception INTO DATA(exc).
+        RAISE upload_file_error.
+    ENDTRY.
+
+    TRY.
+        ZS4_IVGE_CL_GEN_FILE=>download_pc(
+          EXPORTING
+            id_file      = id_dest
+            id_file_type = 'BIN'
+          IMPORTING
+            et_dati = lt_dati[] ) .
+      CATCH cx_dv_exception INTO exc.
+        RAISE download_file_error.
+    ENDTRY.
+
+    CONCATENATE 'Copia' 'file' 'OK' INTO ld_mess SEPARATED BY space .
+    MESSAGE s002(sy) WITH ld_mess.
+
+  ENDMETHOD.
+
+  METHOD download_pc.
+
+    DATA: ld_mess TYPE char100.
+
+    CALL METHOD cl_gui_frontend_services=>gui_download
+      EXPORTING
+        filename                = id_file
+        filetype                = id_file_type
+      CHANGING
+        data_tab                = et_dati
+      EXCEPTIONS
+        file_write_error        = 1
+        no_batch                = 2
+        gui_refuse_filetransfer = 3
+        invalid_type            = 4
+        no_authority            = 5
+        unknown_error           = 6
+        header_not_allowed      = 7
+        separator_not_allowed   = 8
+        filesize_not_allowed    = 9
+        header_too_long         = 10
+        dp_error_create         = 11
+        dp_error_send           = 12
+        dp_error_write          = 13
+        unknown_dp_error        = 14
+        access_denied           = 15
+        dp_out_of_memory        = 16
+        disk_full               = 17
+        dp_timeout              = 18
+        file_not_found          = 19
+        dataprovider_exception  = 20
+        control_flush_error     = 21
+        not_supported_by_gui    = 22
+        error_no_gui            = 23
+        OTHERS                  = 24.
+    IF sy-subrc <> 0.
+      CLEAR ld_mess.
+      CONCATENATE 'Errore download' id_file INTO ld_mess SEPARATED BY space.
+      MESSAGE e002(sy) WITH ld_mess INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ELSE.
+      CLEAR ld_mess.
+      CONCATENATE 'Download' id_file 'OK' INTO ld_mess SEPARATED BY space.
+      MESSAGE s002(sy) WITH ld_mess.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD download_pc_csv.
+
+    DATA: lt_itab TYPE truxs_t_text_data.
+    DATA: ld_mess TYPE char100.
+
+    CALL FUNCTION 'SAP_CONVERT_TO_CSV_FORMAT'
+      EXPORTING
+        i_field_seperator    = ';'
+      TABLES
+        i_tab_sap_data       = et_dati
+      CHANGING
+        i_tab_converted_data = lt_itab
+      EXCEPTIONS
+        conversion_failed    = 1
+        OTHERS               = 2.
+    IF sy-subrc = 0.
+      ZS4_IVGE_CL_GEN_FILE=>download_pc(
+        EXPORTING
+          id_file = id_file
+        IMPORTING
+          et_dati = lt_itab ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD download_server.
+
+    DATA: ld_mess      TYPE symsgv.
+    DATA: lo_ref_line  TYPE REF TO data.
+
+    FIELD-SYMBOLS: <fd_line> TYPE any.
+
+    CREATE DATA lo_ref_line TYPE string.
+    ASSIGN lo_ref_line->* TO <fd_line>.
+
+    CASE id_appending.
+      WHEN abap_false.
+        OPEN DATASET id_file FOR OUTPUT IN TEXT MODE ENCODING DEFAULT.
+      WHEN abap_true.
+        OPEN DATASET id_file FOR APPENDING IN TEXT MODE ENCODING DEFAULT.
+    ENDCASE.
+    IF sy-subrc NE 0.
+      CONCATENATE 'Errore Apertura id_file' id_file
+             INTO ld_mess SEPARATED BY space.
+      MESSAGE e002(sy) WITH ld_mess INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ENDIF.
+
+    LOOP AT it_dati ASSIGNING <fd_line>.
+      IF id_lenght IS NOT INITIAL.
+        IF id_no_end = abap_true.
+          TRANSFER <fd_line> TO id_file LENGTH id_lenght NO END OF LINE.
+        ELSE.
+          TRANSFER <fd_line> TO id_file LENGTH id_lenght.
+        ENDIF.
+      ELSE.
+        IF id_no_end = abap_true.
+          TRANSFER <fd_line> TO id_file NO END OF LINE.
+        ELSE.
+          TRANSFER <fd_line> TO id_file.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+
+    CLOSE DATASET id_file.
+    IF sy-subrc = 0.
+      CONCATENATE 'Download' id_file 'OK' INTO ld_mess SEPARATED BY space.
+      MESSAGE s002(sy) WITH ld_mess INTO dummy.
+    ELSE.
+      CONCATENATE 'Errore Apertura id_file' id_file
+             INTO ld_mess SEPARATED BY space.
+      MESSAGE e002(sy) WITH ld_mess INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD download_server_bin.
+
+    DATA: ld_mess      TYPE symsgv.
+    DATA: lo_ref_line  TYPE REF TO data.
+
+    FIELD-SYMBOLS: <fd_line> TYPE any.
+
+    CREATE DATA lo_ref_line TYPE string.
+    ASSIGN lo_ref_line->* TO <fd_line>.
+
+    CASE id_appending.
+      WHEN abap_false.
+        OPEN DATASET id_file FOR OUTPUT IN BINARY MODE.
+      WHEN abap_true.
+        OPEN DATASET id_file FOR APPENDING IN BINARY MODE.
+    ENDCASE.
+    IF sy-subrc NE 0.
+      CONCATENATE 'Errore Apertura id_file' id_file
+      INTO ld_mess SEPARATed by space.
+      MESSAGE e002(sy) WITH ld_mess INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ENDIF.
+
+    LOOP AT it_dati ASSIGNING <fd_line>.
+      TRANSFER <fd_line> TO id_file.
+    ENDLOOP.
+
+    CLOSE DATASET id_file.
+    IF sy-subrc = 0.
+      CONCATENATE 'Download' id_file 'OK' INTO ld_mess SEPARATED BY space.
+      MESSAGE s002(sy) WITH ld_mess INTO dummy.
+    ELSE.
+      CONCATENATE 'Errore Apertura id_file' id_file
+      INTO ld_mess SEPARATED BY space.
+      MESSAGE e002(sy) WITH ld_mess INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD download_server_zip.
+
+    DATA: ld_mess       TYPE symsgv.
+    DATA: lo_ref_line   TYPE REF TO data.
+    DATA: lt_file_tab   TYPE STANDARD TABLE OF solisti1.
+    DATA: ld_bytecount  TYPE i.
+    DATA: ld_content_x  TYPE xstring.
+    DATA: ld_zip        TYPE xstring.
+    DATA: lo_zipper     TYPE REF TO cl_abap_zip.
+
+    FIELD-SYMBOLS: <fd_line> TYPE any.
+
+    CREATE DATA lo_ref_line TYPE string.
+    ASSIGN lo_ref_line->* TO <fd_line>.
+
+    CALL FUNCTION 'SX_TABLE_LINE_WIDTH_CHANGE'
+      EXPORTING
+        line_width_src = 134
+        line_width_dst = 255
+      TABLES
+        content_in     = it_dati
+        content_out    = lt_file_tab.
+
+    ld_bytecount = id_size.
+    CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
+      EXPORTING
+        input_length = ld_bytecount
+      IMPORTING
+        buffer       = ld_content_x
+      TABLES
+        binary_tab   = lt_file_tab[].
+
+    "create our zipper object
+    CREATE OBJECT lo_zipper.
+
+    "add file to zip
+    lo_zipper->add(
+      EXPORTING
+        name    = id_file_zip
+        content = ld_content_x ).
+
+    "save zip
+    ld_zip = lo_zipper->save( ).
+
+    CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+      EXPORTING
+        buffer        = ld_zip
+      IMPORTING
+        output_length = ld_bytecount
+      TABLES
+        binary_tab    = lt_file_tab.
+
+    ZS4_IVGE_CL_GEN_FILE=>download_server_bin(
+        id_file      = id_file_zip
+        it_dati      = lt_file_tab
+        id_appending = id_appending ).
+
+
+  ENDMETHOD.
+  METHOD f4_filename.
+
+    DATA: ld_selected_folder TYPE string.
+    DATA: lt_file_table      TYPE filetable.
+    DATA: ld_rc              TYPE i.
+
+    CASE id_presentation.
+      WHEN abap_true.
+        CALL METHOD cl_gui_frontend_services=>directory_browse
+          CHANGING
+            selected_folder      = ld_selected_folder
+          EXCEPTIONS
+            cntl_error           = 1
+            error_no_gui         = 2
+            not_supported_by_gui = 3
+            OTHERS               = 4.
+
+        IF sy-subrc = 0 AND NOT ld_selected_folder IS INITIAL.
+          CALL METHOD cl_gui_frontend_services=>file_open_dialog
+            EXPORTING
+*             WINDOW_TITLE            =
+              default_extension       = '*'
+              default_filename        = '*.*'
+              file_filter             = '*.*'
+              initial_directory       = ld_selected_folder
+              multiselection          = abap_false
+            CHANGING
+              file_table              = lt_file_table
+              rc                      = ld_rc
+            EXCEPTIONS
+              file_open_dialog_failed = 1
+              cntl_error              = 2
+              error_no_gui            = 3
+              not_supported_by_gui    = 4
+              OTHERS                  = 5.
+
+          IF sy-subrc = 0 AND NOT lt_file_table IS INITIAL.
+            READ TABLE lt_file_table ASSIGNING FIELD-SYMBOL(<ld_file>) INDEX 1.
+            IF sy-subrc = 0.
+              rd_filename = <ld_file>-filename.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      WHEN abap_false.
+        CALL FUNCTION '/SAPDMC/LSM_F4_SERVER_FILE'
+          EXPORTING
+            directory        = '.'
+            filemask         = '*.*'
+          IMPORTING
+            serverfile       = rd_filename
+          EXCEPTIONS
+            canceled_by_user = 1
+            OTHERS           = 2.
+        IF sy-subrc <> 0.
+        ENDIF.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD upload_pc.
+
+    DATA: ld_mess TYPE char100.
+
+    CALL METHOD cl_gui_frontend_services=>gui_upload(
+      EXPORTING
+        filename                = id_file
+        filetype                = id_type
+      IMPORTING
+        filelength              = ed_size
+      CHANGING
+        data_tab                = et_dati[]
+      EXCEPTIONS
+        file_open_error         = 1
+        file_read_error         = 2
+        no_batch                = 3
+        gui_refuse_filetransfer = 4
+        invalid_type            = 5
+        no_authority            = 6
+        unknown_error           = 7
+        bad_data_format         = 8
+        header_not_allowed      = 9
+        separator_not_allowed   = 10
+        header_too_long         = 11
+        unknown_dp_error        = 12
+        access_denied           = 13
+        dp_out_of_memory        = 14
+        disk_full               = 15
+        dp_timeout              = 16
+        not_supported_by_gui    = 17
+        error_no_gui            = 18
+        OTHERS                  = 19 ).
+    IF sy-subrc NE 0.
+      CLEAR ld_mess.
+      CONCATENATE 'Upload' id_file 'KO' INTO ld_mess SEPARATED BY space.
+      MESSAGE e002(sy) WITH ld_mess INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ELSE.
+      CLEAR ld_mess.
+      CONCATENATE 'Upload' id_file 'OK' INTO ld_mess SEPARATED BY space.
+      MESSAGE s002(sy) WITH ld_mess.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD upload_pc_csv.
+
+    DATA: lt_itab TYPE truxs_t_text_data.
+    DATA: ld_mess TYPE char100.
+
+    ZS4_IVGE_CL_GEN_FILE=>upload_pc(
+      EXPORTING
+        id_file = id_file
+         id_type = 'ASC'
+      IMPORTING
+        et_dati = lt_itab ).
+
+    CALL FUNCTION 'TEXT_CONVERT_CSV_TO_SAP'
+      EXPORTING
+        i_field_seperator    = id_field_seperator
+        i_line_header        = id_line_header
+        i_tab_raw_data       = lt_itab
+      TABLES
+        i_tab_converted_data = et_dati
+      EXCEPTIONS
+        conversion_failed    = 1
+        OTHERS               = 2.
+    IF sy-subrc <> 0.
+      CONCATENATE 'Conversion Failed' id_file
+             INTO ld_mess SEPARATED BY space.
+      MESSAGE e002(sy) WITH ld_mess INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ELSE.
+      CONCATENATE 'Conversion' id_file 'OK'
+      INTO ld_mess SEPARATED BY space.
+      MESSAGE s002(sy) WITH ld_mess.
+    ENDIF.
+
+  ENDMETHOD.
+  METHOD upload_server.
+
+    DATA: ld_mess      TYPE symsgv.
+    DATA: lo_ref_line  TYPE REF TO data.
+
+    FIELD-SYMBOLS: <fd_line> TYPE any.
+
+    CREATE DATA lo_ref_line TYPE string.
+    ASSIGN lo_ref_line->* TO <fd_line>.
+
+    FREE et_dati.
+
+    IF iv_non_unicode EQ 'X'.
+      OPEN DATASET id_file FOR INPUT IN TEXT MODE ENCODING NON-UNICODE.
+    ELSE.
+      OPEN DATASET id_file FOR INPUT IN TEXT MODE ENCODING DEFAULT.
+    ENDIF.
+    IF sy-subrc NE 0.
+      CLEAR ld_mess.
+      CONCATENATE 'Errore Apertura  file' id_file
+      INTO ld_mess SEPARATED by space.
+      MESSAGE e002(sy) WITH ld_mess INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ENDIF.
+
+    DO.
+      READ DATASET id_file INTO <fd_line>.
+      IF sy-subrc NE 0.
+        EXIT.
+      ELSE.
+        APPEND <fd_line> TO et_dati.
+      ENDIF.
+    ENDDO.
+
+    CLOSE DATASET id_file.
+
+    IF et_dati[] IS NOT INITIAL.
+      CLEAR ld_mess.
+      CONCATENATE 'Upload' id_file 'OK' INTO ld_mess SEPARATED BY space.
+      MESSAGE s002(sy) WITH ld_mess.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD upload_server_bin.
+
+    DATA: ld_mess      TYPE symsgv.
+    DATA: lo_ref_line  TYPE REF TO data.
+
+    FIELD-SYMBOLS: <fd_line> TYPE any.
+
+    CREATE DATA lo_ref_line TYPE string.
+    ASSIGN lo_ref_line->* TO <fd_line>.
+
+    FREE et_dati.
+
+    OPEN DATASET id_file FOR INPUT IN BINARY MODE.
+    IF sy-subrc NE 0.
+      CLEAR ld_mess.
+      CONCATENATE 'Errore Apertura  file' id_file
+      INTO ld_mess SEPARATED by space.
+      MESSAGE e002(sy) WITH ld_mess INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ENDIF.
+
+    DO.
+      READ DATASET id_file INTO <fd_line>.
+      IF sy-subrc NE 0.
+        EXIT.
+      ELSE.
+        APPEND <fd_line> TO et_dati.
+      ENDIF.
+    ENDDO.
+
+    CLOSE DATASET id_file.
+
+    IF et_dati[] IS NOT INITIAL.
+      CLEAR ld_mess.
+      CONCATENATE 'Upload' id_file 'OK' INTO ld_mess SEPARATED BY space.
+      MESSAGE s002(sy) WITH ld_mess.
+    ENDIF.
+
+  ENDMETHOD.
+  METHOD upload_xls_from_pc.
+
+    DATA: lo_dref TYPE REF TO data.
+    DATA: lo_lref TYPE REF TO data.
+
+    DATA: ld_cols       TYPE sytabix.
+    DATA: ld_begin_row  TYPE sytabix.
+    DATA: ld_end_col    TYPE sytabix.
+    DATA: lt_tabline    TYPE TABLE OF alsmex_tabline.
+
+    FIELD-SYMBOLS: <lt> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS: <ls> TYPE any.
+    FIELD-SYMBOLS: <ld> TYPE any.
+
+    CREATE DATA lo_dref TYPE TABLE OF (id_row_type).
+    CREATE DATA lo_lref TYPE (id_row_type).
+
+    ASSIGN lo_dref->* TO <lt>.
+    ASSIGN lo_lref->* TO <ls>.
+
+    DO.
+      UNASSIGN <ld>.
+      ASSIGN COMPONENT sy-index OF STRUCTURE <ls> TO <ld>.
+      IF sy-subrc NE 0. EXIT. ENDIF.
+      ADD 1 TO ld_cols.
+    ENDDO.
+
+    IF ld_cols = 0.
+      EXIT.
+    ENDIF.
+
+    ld_begin_row = SWITCH #( id_header
+                                   WHEN abap_false THEN 1
+                                   WHEN abap_true  THEN 2 ) .
+
+    CALL FUNCTION 'ALSM_EXCEL_TO_INTERNAL_TABLE'
+      EXPORTING
+        filename                = id_file
+        i_begin_col             = 1
+        i_begin_row             = ld_begin_row
+        i_end_col               = ld_cols
+        i_end_row               = id_rows
+*        i_shname                = id_sheet
+      TABLES
+        intern                  = lt_tabline
+      EXCEPTIONS
+        inconsistent_parameters = 1
+        upload_ole              = 2
+        OTHERS                  = 3.
+
+    IF sy-subrc <> 0.
+      MESSAGE e777(s3) WITH 'Processing File Error.' INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ENDIF.
+
+    LOOP AT lt_tabline ASSIGNING FIELD-SYMBOL(<ls_tabline>).
+      UNASSIGN <ld>.
+      ASSIGN COMPONENT <ls_tabline>-col OF STRUCTURE <ls> TO <ld>.
+      IF <ld> IS NOT ASSIGNED.
+        CONTINUE.
+      ENDIF.
+
+      DATA(ld_type) = cl_abap_datadescr=>get_data_type_kind( <ld> ).
+      CASE ld_type.
+        WHEN cl_abap_typedescr=>typekind_decfloat
+          OR cl_abap_typedescr=>typekind_decfloat16
+          OR cl_abap_typedescr=>typekind_decfloat34
+          OR cl_abap_typedescr=>typekind_float
+          OR cl_abap_typedescr=>typekind_int
+          OR cl_abap_typedescr=>typekind_int1
+          OR cl_abap_typedescr=>typekind_int2
+          OR cl_abap_typedescr=>typekind_packed.
+
+          REPLACE ALL OCCURRENCES OF '.' IN <ls_tabline>-value WITH space.
+          REPLACE ALL OCCURRENCES OF ',' IN <ls_tabline>-value WITH '.'.
+          CONDENSE <ls_tabline>-value NO-GAPS.
+        WHEN cl_abap_typedescr=>typekind_date.
+
+          REPLACE ALL OCCURRENCES OF '/' IN <ls_tabline>-value WITH '.'.
+          REPLACE ALL OCCURRENCES OF '-' IN <ls_tabline>-value WITH '.'.
+          CALL FUNCTION 'CONVERSION_EXIT_SDATE_INPUT'
+            EXPORTING
+              input  = <ls_tabline>-value
+            IMPORTING
+              output = <ls_tabline>-value.
+        WHEN cl_abap_typedescr=>typekind_time.
+          REPLACE ALL OCCURRENCES OF ':' IN <ls_tabline>-value WITH space.
+          CONDENSE <ls_tabline>-value NO-GAPS.
+        WHEN OTHERS.
+      ENDCASE.
+
+      TRY.
+          <ld> = <ls_tabline>-value.
+        CATCH cx_sy_conversion_error INTO DATA(exc_conv).
+          MESSAGE e777(s3) WITH 'Conversion Error' INTO dummy.
+          cx_dv_exception=>raise_from_message( ).
+      ENDTRY.
+
+      AT END OF row.
+        APPEND <ls> TO <lt>. CLEAR <ls>.
+      ENDAT.
+    ENDLOOP.
+
+    et_tab = <lt>.
+
+  ENDMETHOD.
+  METHOD copy_server_bin.
+
+    DATA lt TYPE STANDARD TABLE OF string.
+
+    TRY.
+        ZS4_IVGE_CL_GEN_FILE=>upload_server_bin(
+          EXPORTING
+            id_file = id_file_src
+          IMPORTING
+            et_dati = lt[] ).
+      CATCH cx_dv_exception INTO DATA(lo_exc).
+        cx_dv_exception=>raise_from_message( ).
+    ENDTRY.
+
+    TRY.
+        ZS4_IVGE_CL_GEN_FILE=>download_server_bin(
+          EXPORTING
+            id_file = id_file_dest
+            it_dati = lt[] ).
+      CATCH cx_dv_exception INTO lo_exc.
+        cx_dv_exception=>raise_from_message( ).
+    ENDTRY.
+
+    IF id_source_delete = abap_true.
+      DELETE DATASET id_file_src.
+    ENDIF.
+
+  ENDMETHOD.
+  METHOD upload_csv_from_pc.
+
+    DATA: lo_dref TYPE REF TO data.
+    DATA: lo_lref TYPE REF TO data.
+
+    DATA: lt_tabline    TYPE STANDARD TABLE OF kcde_cells.
+
+    FIELD-SYMBOLS: <lt> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS: <ls> TYPE any.
+    FIELD-SYMBOLS: <ld> TYPE any.
+
+    CREATE DATA lo_dref TYPE TABLE OF (id_row_type).
+    CREATE DATA lo_lref TYPE (id_row_type).
+
+    ASSIGN lo_dref->* TO <lt>.
+    ASSIGN lo_lref->* TO <ls>.
+
+    CALL FUNCTION 'KCD_CSV_FILE_TO_INTERN_CONVERT'
+      EXPORTING
+        i_filename      = id_file
+        i_separator     = id_separator
+      TABLES
+        e_intern        = lt_tabline
+      EXCEPTIONS
+        upload_csv      = 1
+        upload_filetype = 2
+        OTHERS          = 3.
+    IF sy-subrc <> 0.
+      MESSAGE e777(s3) WITH 'Processing File Error.' INTO dummy.
+      cx_dv_exception=>raise_from_message( ).
+    ENDIF.
+
+    IF id_header = abap_true.
+      DELETE lt_tabline WHERE row = '0001'.
+    ENDIF.
+
+    LOOP AT lt_tabline ASSIGNING FIELD-SYMBOL(<ls_tabline>).
+      UNASSIGN <ld>.
+      ASSIGN COMPONENT <ls_tabline>-col OF STRUCTURE <ls> TO <ld>.
+      IF <ld> IS NOT ASSIGNED.
+        CONTINUE.
+      ENDIF.
+
+      DATA(ld_type) = cl_abap_datadescr=>get_data_type_kind( <ld> ).
+      CASE ld_type.
+        WHEN cl_abap_typedescr=>typekind_decfloat
+          OR cl_abap_typedescr=>typekind_decfloat16
+          OR cl_abap_typedescr=>typekind_decfloat34
+          OR cl_abap_typedescr=>typekind_float
+          OR cl_abap_typedescr=>typekind_int
+          OR cl_abap_typedescr=>typekind_int1
+          OR cl_abap_typedescr=>typekind_int2
+          OR cl_abap_typedescr=>typekind_packed.
+
+          REPLACE ALL OCCURRENCES OF '.' IN <ls_tabline>-value WITH space.
+          REPLACE ALL OCCURRENCES OF ',' IN <ls_tabline>-value WITH '.'.
+          CONDENSE <ls_tabline>-value NO-GAPS.
+        WHEN cl_abap_typedescr=>typekind_date.
+
+          REPLACE ALL OCCURRENCES OF '/' IN <ls_tabline>-value WITH '.'.
+          REPLACE ALL OCCURRENCES OF '-' IN <ls_tabline>-value WITH '.'.
+          CALL FUNCTION 'CONVERSION_EXIT_SDATE_INPUT'
+            EXPORTING
+              input  = <ls_tabline>-value
+            IMPORTING
+              output = <ls_tabline>-value.
+        WHEN cl_abap_typedescr=>typekind_time.
+          REPLACE ALL OCCURRENCES OF ':' IN <ls_tabline>-value WITH space.
+          CONDENSE <ls_tabline>-value NO-GAPS.
+        WHEN OTHERS.
+      ENDCASE.
+
+      TRY.
+          <ld> = <ls_tabline>-value.
+        CATCH cx_sy_conversion_error INTO DATA(exc_conv).
+          MESSAGE e777(s3) WITH 'Conversion Error' INTO dummy.
+          cx_dv_exception=>raise_from_message( ).
+      ENDTRY.
+
+      AT END OF row.
+        APPEND <ls> TO <lt>. CLEAR <ls>.
+      ENDAT.
+    ENDLOOP.
+
+    et_dati = <lt>.
+
+  ENDMETHOD.
+  METHOD upload_csv_from_server.
+
+    DATA: lo_dref TYPE REF TO data.
+    DATA: lo_lref TYPE REF TO data.
+
+    FIELD-SYMBOLS: <lt> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS: <ls> TYPE any.
+    FIELD-SYMBOLS: <ld> TYPE any.
+
+    CREATE DATA lo_dref TYPE TABLE OF (id_row_type).
+    CREATE DATA lo_lref TYPE (id_row_type).
+
+    ASSIGN lo_dref->* TO <lt>.
+    ASSIGN lo_lref->* TO <ls>.
+
+    DATA: lt_dbupl      TYPE STANDARD TABLE OF string,
+          lt_parts      TYPE STANDARD TABLE OF string,
+          lv_comp_index TYPE i.
+*--------------------------------------------------------------------*
+
+    TRY.
+        CALL METHOD zs4_ivge_cl_gen_file=>upload_server
+          EXPORTING
+            id_file = id_file
+          IMPORTING
+            et_dati = lt_dbupl.
+      CATCH cx_dv_exception INTO DATA(lo_exc).
+        cx_dv_exception=>raise_from_message( ).
+    ENDTRY.
+
+    IF id_header = abap_true.
+      DELETE lt_dbupl INDEX 1.
+    ENDIF.
+
+    "Populating CSV structure
+    LOOP AT lt_dbupl INTO DATA(ls_dbupl).
+      IF ls_dbupl IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      "Last character CRLF problem
+      REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN ls_dbupl WITH ''.       "CR_LF
+      REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf(1) IN ls_dbupl WITH ''.    "CR
+      REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf+1(1) IN ls_dbupl WITH ''.  "LF
+
+      SPLIT ls_dbupl AT id_separator INTO TABLE lt_parts.
+
+      lv_comp_index = 0.
+      LOOP AT lt_parts INTO DATA(ls_part).
+        lv_comp_index = lv_comp_index + 1.
+        IF ls_part IS INITIAL.
+          CONTINUE.
+        ENDIF.
+
+        ASSIGN COMPONENT lv_comp_index OF STRUCTURE <ls> TO <ld>.
+        IF <ld> IS NOT ASSIGNED.
+          CONTINUE.
+        ENDIF.
+
+        DATA(ld_type) = cl_abap_datadescr=>get_data_type_kind( <ld> ).
+        CASE ld_type.
+          WHEN cl_abap_typedescr=>typekind_decfloat
+            OR cl_abap_typedescr=>typekind_decfloat16
+            OR cl_abap_typedescr=>typekind_decfloat34
+            OR cl_abap_typedescr=>typekind_float
+            OR cl_abap_typedescr=>typekind_int
+            OR cl_abap_typedescr=>typekind_int1
+            OR cl_abap_typedescr=>typekind_int2
+            OR cl_abap_typedescr=>typekind_packed.
+
+            REPLACE ALL OCCURRENCES OF '.' IN ls_part WITH space.
+            REPLACE ALL OCCURRENCES OF ',' IN ls_part WITH '.'.
+            CONDENSE ls_part NO-GAPS.
+          WHEN cl_abap_typedescr=>typekind_date.
+
+            REPLACE ALL OCCURRENCES OF '/' IN ls_part WITH '.'.
+            REPLACE ALL OCCURRENCES OF '-' IN ls_part WITH '.'.
+            CALL FUNCTION 'CONVERSION_EXIT_SDATE_INPUT'
+              EXPORTING
+                input  = ls_part
+              IMPORTING
+                output = ls_part.
+          WHEN cl_abap_typedescr=>typekind_time.
+            REPLACE ALL OCCURRENCES OF ':' IN ls_part WITH space.
+            CONDENSE ls_part NO-GAPS.
+          WHEN OTHERS.
+        ENDCASE.
+
+        TRY.
+            <ld> = ls_part.
+          CATCH cx_sy_conversion_error INTO DATA(exc_conv).
+            MESSAGE e777(s3) WITH 'Conversion Error' INTO dummy.
+            cx_dv_exception=>raise_from_message( ).
+        ENDTRY.
+
+      ENDLOOP.
+
+      APPEND <ls> TO <lt>. CLEAR <ls>.
+    ENDLOOP.
+
+    et_dati = <lt>.
+
+  ENDMETHOD.
+
