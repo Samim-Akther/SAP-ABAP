@@ -1192,3 +1192,444 @@ private section.
 
   ENDMETHOD.
 
+
+------------------
+
+*&---------------------------------------------------------------------*
+*& Include          ZS4_IVGE_STD_COL_CLS
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+* Author      : Samim Akther
+* Date        : 22/06/2026
+* RICEFW ID   : GAPMD063
+*&---------------------------------------------------------------------*
+*---------------------------------------------------------------------*
+* Class Implementation
+*---------------------------------------------------------------------*
+CLASS lcl_main IMPLEMENTATION.
+
+  METHOD init.
+    sscrfields-functxt_01 = TEXT-015.
+    sscrfields-functxt_02 = TEXT-016.
+  ENDMETHOD.
+
+  METHOD authority_check.
+
+    rv_error = abap_false.
+
+    AUTHORITY-CHECK OBJECT gc_m_mate_wrk    "'M_MATE_WRK'
+      ID gc_actvt FIELD iv_actvt
+      ID gc_werks FIELD p_werks.
+
+    IF sy-subrc IS NOT INITIAL.
+      MESSAGE i003(ZS4_IVGE_LOG) WITH p_werks DISPLAY LIKE gc_e.
+      rv_error = abap_true.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD run.
+
+    IF authority_check( iv_actvt = gc_act_display ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    DATA(lt_data) = get_data( ).
+
+    IF lt_data IS INITIAL.
+      MESSAGE i000(db) WITH TEXT-002.
+      RETURN.
+    ENDIF.
+
+    display_data( lt_data ).
+
+  ENDMETHOD.
+
+  METHOD export_file.
+
+    IF authority_check( iv_actvt = gc_act_display ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    DATA(lt_data) = get_data( ).
+
+    "If no DB rows found, still export one line so headers/template are created
+    IF lt_data IS INITIAL.
+      APPEND VALUE zs4_ivge_st_std_inv(
+        werks      = p_werks
+        gjahr      = p_gjahr
+        versione   = p_vers
+        color_code = p_color
+        medio      = p_medio ) TO lt_data.
+    ENDIF.
+
+    download_file( lt_data ).
+
+  ENDMETHOD.
+
+  METHOD import_file.
+
+    IF authority_check( iv_actvt = gc_act_change ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    DATA(lt_file) = upload_file( ).
+
+    IF lt_file IS INITIAL.
+      MESSAGE i000(db) WITH TEXT-003.
+      RETURN.
+    ENDIF.
+
+    DATA(lt_log) = validate_and_save( lt_file ).
+
+    display_log( lt_log ).
+
+  ENDMETHOD.
+
+  METHOD get_data.
+
+    SELECT werks,
+           gjahr,
+           version,
+           color_code,
+           medio
+      FROM zs4_ivge_std_inv
+      WHERE werks = @p_werks
+        AND gjahr = @p_gjahr
+        AND ( @p_vers  IS INITIAL OR version    = @p_vers )
+        AND ( @p_color IS INITIAL OR color_code = @p_color )
+        AND ( @p_medio IS INITIAL OR medio      = @p_medio )
+      ORDER BY PRIMARY KEY
+      INTO TABLE @rt_data.
+
+  ENDMETHOD.
+
+  METHOD display_data.
+
+    DATA lt_data TYPE ty_t_file.
+    lt_data = it_data.
+
+    TRY.
+        cl_salv_table=>factory(
+          IMPORTING
+            r_salv_table = DATA(lo_salv)
+          CHANGING
+            t_table      = lt_data ).
+
+        lo_salv->get_functions( )->set_all( abap_true ).
+        lo_salv->display( ).
+
+      CATCH cx_salv_msg INTO DATA(lo_msg).
+        MESSAGE lo_msg->get_text( ) TYPE gc_i.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD display_log.
+
+    DATA lt_log TYPE ty_t_log.
+    lt_log = it_log.
+
+    IF lt_log IS INITIAL.
+      MESSAGE i000(db) WITH TEXT-004.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        cl_salv_table=>factory(
+          IMPORTING
+            r_salv_table = DATA(lo_salv)
+          CHANGING
+            t_table      = lt_log ).
+
+        lo_salv->get_functions( )->set_all( abap_true ).
+        lo_salv->display( ).
+
+      CATCH cx_salv_msg INTO DATA(lo_msg).
+        MESSAGE lo_msg->get_text( ) TYPE gc_i.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD download_file.
+    DATA: lt_filetab     TYPE filetable,
+          lv_rc          TYPE i,
+          lv_user_action TYPE i,
+          lt_bin         TYPE solix_tab,
+          lv_len         TYPE i.
+
+    DATA(lt_export) = it_file.
+
+    TRY.
+        cl_salv_table=>factory(
+          IMPORTING
+            r_salv_table = DATA(lo_salv)
+          CHANGING
+            t_table      = lt_export ).
+
+        DATA(lv_xml) = lo_salv->to_xml(
+                         xml_type = if_salv_bs_xml=>c_type_xlsx ).
+
+      CATCH cx_salv_error INTO DATA(lo_salv_error).
+        MESSAGE lo_salv_error->get_text( ) TYPE gc_e.
+        RETURN.
+    ENDTRY.
+
+    CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+      EXPORTING
+        buffer        = lv_xml
+      IMPORTING
+        output_length = lv_len
+      TABLES
+        binary_tab    = lt_bin.
+
+    cl_gui_frontend_services=>file_open_dialog(
+      EXPORTING
+        default_filename = gc_file_ext
+        file_filter      = gc_file_ext
+      CHANGING
+        file_table       = lt_filetab
+        rc               = lv_rc
+        user_action      = lv_user_action ).
+
+    IF lv_rc <= gc_0 OR lt_filetab IS INITIAL.
+      MESSAGE i000(db) WITH TEXT-005.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_filename) = CONV string( lt_filetab[ 1 ]-filename ).
+
+    cl_gui_frontend_services=>gui_download(
+      EXPORTING
+        bin_filesize = lv_len
+        filename     = lv_filename
+        filetype     = gc_filetype
+      CHANGING
+        data_tab     = lt_bin ).
+
+    MESSAGE i000(db) WITH TEXT-006.
+
+
+  ENDMETHOD.
+
+  METHOD upload_file.
+
+    DATA: lt_filetab     TYPE filetable,
+          lv_rc          TYPE i,
+          lv_user_action TYPE i.
+
+    CALL METHOD cl_gui_frontend_services=>file_open_dialog
+      EXPORTING
+        default_filename = gc_file_ext
+        file_filter      = gc_file_ext
+      CHANGING
+        file_table       = lt_filetab
+        rc               = lv_rc
+        user_action      = lv_user_action.
+
+    IF lv_rc <= gc_0 OR lt_filetab IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_filename) = CONV localfile( lt_filetab[ 1 ]-filename ).
+
+    TRY.
+        CALL METHOD zs4_ivge_cl_gen_file=>upload_xls_from_pc
+          EXPORTING
+            id_file     = lv_filename
+            id_row_type = gc_row_type
+            id_header   = abap_true
+            id_rows     = gc_max_rows
+          IMPORTING
+            et_tab      = rt_file.
+
+      CATCH cx_dv_exception INTO DATA(lo_exc).
+        MESSAGE lo_exc->get_text( ) TYPE gc_e.
+        CLEAR rt_file.
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD validate_and_save.
+
+    DATA: lt_file     TYPE ty_t_file,
+          lt_valid    TYPE TABLE OF ty_log WITH EMPTY KEY,
+
+          "duplicate tracker for uploaded file keys
+          lt_seen     TYPE HASHED TABLE OF zs4_ivge_std_inv
+                                 WITH UNIQUE KEY werks gjahr color_code,
+
+          "existing DB records loaded once
+          lt_existing TYPE HASHED TABLE OF zs4_ivge_st_std_inv
+                                  WITH UNIQUE KEY werks gjahr color_code,
+          lt_insert   TYPE STANDARD TABLE OF zs4_ivge_std_inv.
+
+    lt_file = it_file.
+
+    "---------------------------------------------------------------*
+    "* Step 1: Validate file and prepare valid rows
+    "---------------------------------------------------------------*
+    LOOP AT lt_file ASSIGNING FIELD-SYMBOL(<ls_file>).
+
+      DATA(ls_log) = VALUE ty_log(
+                        row_id     = sy-tabix
+                        werks      = <ls_file>-werks
+                        gjahr      = <ls_file>-gjahr
+                        versione   = <ls_file>-versione
+                        color_code = <ls_file>-color_code
+                        medio      = <ls_file>-medio ).
+
+      "Normalize plant using modern syntax
+      <ls_file>-werks = |{ <ls_file>-werks ALPHA = IN }|.
+      ls_log-werks    = <ls_file>-werks.
+
+      IF <ls_file>-werks IS INITIAL.
+        ls_log-icon    = icon_red_light.
+        ls_log-type    = gc_e.
+        ls_log-message = TEXT-007.
+        APPEND ls_log TO rt_log.
+        CONTINUE.
+      ENDIF.
+
+      IF <ls_file>-gjahr IS INITIAL.
+        ls_log-icon    = icon_red_light.
+        ls_log-type    = gc_e.
+        ls_log-message = TEXT-008.
+        APPEND ls_log TO rt_log.
+        CONTINUE.
+      ENDIF.
+
+      IF <ls_file>-color_code IS INITIAL.
+        ls_log-icon    = icon_red_light.
+        ls_log-type    = gc_e.
+        ls_log-message = TEXT-009.
+        APPEND ls_log TO rt_log.
+        CONTINUE.
+      ENDIF.
+
+      IF <ls_file>-medio IS INITIAL.
+        ls_log-icon    = icon_red_light.
+        ls_log-type    = gc_e.
+        ls_log-message = TEXT-010.
+        APPEND ls_log TO rt_log.
+        CONTINUE.
+      ENDIF.
+
+      "Duplicate key in same upload file
+      IF line_exists(
+           lt_seen[
+             werks      = <ls_file>-werks
+             gjahr      = <ls_file>-gjahr
+             color_code = <ls_file>-color_code ] ).
+
+        ls_log-icon    = icon_red_light.
+        ls_log-type    = gc_e.
+        ls_log-message = TEXT-011.
+        APPEND ls_log TO rt_log.
+        CONTINUE.
+      ENDIF.
+
+      INSERT VALUE #(
+               werks      = <ls_file>-werks
+               gjahr      = <ls_file>-gjahr
+               color_code = <ls_file>-color_code ) INTO TABLE lt_seen.
+
+      APPEND ls_log TO lt_valid.
+      CLEAR ls_log.
+    ENDLOOP.
+
+    IF lt_valid IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    "---------------------------------------------------------------*
+    "* Step 2: Read existing database rows once
+    "---------------------------------------------------------------*
+    SELECT
+    db~werks,
+    db~gjahr,
+    db~version,
+    db~color_code,
+    db~medio
+  FROM zs4_ivge_std_inv AS db
+  INNER JOIN @lt_valid AS it
+    ON db~werks      = it~werks
+   AND db~gjahr      = it~gjahr
+   AND db~color_code = it~color_code
+  INTO TABLE @lt_existing.
+
+    "---------------------------------------------------------------*
+    "* Step 3:  Insert and build final log
+    "---------------------------------------------------------------*
+
+    LOOP AT lt_valid ASSIGNING FIELD-SYMBOL(<ls_valid>).
+
+      DATA(ls_existing) = VALUE #(
+                            lt_existing[
+                              werks      = <ls_valid>-werks
+                              gjahr      = <ls_valid>-gjahr
+                              color_code = <ls_valid>-color_code ] OPTIONAL ).
+
+      IF ls_existing-werks IS NOT INITIAL.
+
+        APPEND VALUE ty_log(
+                 row_id     = <ls_valid>-row_id
+                 icon       = icon_red_light
+                 werks      = <ls_valid>-werks
+                 gjahr      = <ls_valid>-gjahr
+                 versione   = <ls_valid>-versione
+                 color_code = <ls_valid>-color_code
+                 medio      = <ls_valid>-medio
+                 type       = gc_e
+                 message    = |{ TEXT-012 }{ <ls_valid>-werks }/{ <ls_valid>-gjahr }/{ <ls_valid>-color_code } { TEXT-017 }| )
+          TO rt_log.
+
+        CONTINUE.
+      ENDIF.
+
+      APPEND VALUE zs4_ivge_std_inv(
+        werks      = <ls_valid>-werks
+        gjahr      = <ls_valid>-gjahr
+        version    = <ls_valid>-versione
+        color_code = <ls_valid>-color_code
+        medio      = <ls_valid>-medio
+        ersda      = sy-datum
+        aenam      = sy-uname
+        laeda      = sy-datum
+      ) TO lt_insert.
+
+    ENDLOOP.
+
+
+    IF lt_insert IS NOT INITIAL.
+
+      INSERT zs4_ivge_std_inv FROM TABLE lt_insert.
+
+      LOOP AT lt_insert ASSIGNING FIELD-SYMBOL(<fs_ins>).
+
+        APPEND VALUE ty_log(
+          row_id     = sy-tabix
+          icon       = COND #( WHEN sy-subrc = gc_0 THEN icon_green_light ELSE icon_red_light )
+          werks      = <fs_ins>-werks
+          gjahr      = <fs_ins>-gjahr
+          versione   = <fs_ins>-version
+          color_code = <fs_ins>-color_code
+          medio      = <fs_ins>-medio
+          type       = COND #( WHEN sy-subrc = gc_0 THEN gc_s ELSE gc_e )
+          message    = COND #(
+                         WHEN sy-subrc = gc_0
+                         THEN TEXT-013
+                         ELSE |{ TEXT-014 }  { <fs_ins>-werks }/{ <fs_ins>-gjahr }/{ <fs_ins>-color_code }| )
+        ) TO rt_log.
+
+      ENDLOOP.
+
+
+        COMMIT WORK AND WAIT.
+
+    ENDIF.
+  ENDMETHOD.
+
+ENDCLASS.
+
+
