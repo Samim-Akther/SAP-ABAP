@@ -1,0 +1,438 @@
+REPORT zsplitter_kna1_vbak_alv.
+
+*---------------------------------------------------------------------*
+* Type Declarations
+*---------------------------------------------------------------------*
+TYPES: BEGIN OF ty_kna1,
+         kunnr TYPE kna1-kunnr,
+         name1 TYPE kna1-name1,
+         ort01 TYPE kna1-ort01,
+         land1 TYPE kna1-land1,
+         regio TYPE kna1-regio,
+         pstlz TYPE kna1-pstlz,
+         stras TYPE kna1-stras,
+         sortl TYPE kna1-sortl,
+         erdat TYPE kna1-erdat,
+       END OF ty_kna1.
+
+TYPES: BEGIN OF ty_vbak,
+         vbeln TYPE vbak-vbeln,
+         auart TYPE vbak-auart,
+         kunnr TYPE vbak-kunnr,
+         vkorg TYPE vbak-vkorg,
+         vtweg TYPE vbak-vtweg,
+         spart TYPE vbak-spart,
+         erdat TYPE vbak-erdat,
+         ernam TYPE vbak-ernam,
+         audat TYPE vbak-audat,
+         netwr TYPE vbak-netwr,
+         waerk TYPE vbak-waerk,
+       END OF ty_vbak.
+
+*---------------------------------------------------------------------*
+* Data Declarations
+*---------------------------------------------------------------------*
+DATA: lv_kunnr TYPE kunnr,
+      ok_code  TYPE sy-ucomm.
+
+DATA: gt_kna1 TYPE STANDARD TABLE OF ty_kna1,
+      gt_vbak TYPE STANDARD TABLE OF ty_vbak.
+
+DATA: gt_fcat_kna1 TYPE lvc_t_fcat,
+      gt_fcat_vbak TYPE lvc_t_fcat.
+
+DATA: gs_layout_kna1 TYPE lvc_s_layo,
+      gs_layout_vbak TYPE lvc_s_layo.
+
+DATA: cust_cont TYPE REF TO cl_gui_custom_container,
+      o_cont1   TYPE REF TO cl_gui_container,
+      o_cont2   TYPE REF TO cl_gui_container,
+      kna1_grid TYPE REF TO cl_gui_alv_grid,
+      vbak_grid TYPE REF TO cl_gui_alv_grid,
+      o_split   TYPE REF TO cl_gui_splitter_container.
+
+*---------------------------------------------------------------------*
+* Selection Screen
+*---------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+  SELECT-OPTIONS: so_kunnr FOR lv_kunnr.
+SELECTION-SCREEN END OF BLOCK b1.
+
+*---------------------------------------------------------------------*
+* Start-of-selection
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+
+  PERFORM get_data.
+
+  CALL SCREEN 100.
+
+*---------------------------------------------------------------------*
+* Form GET_DATA
+*---------------------------------------------------------------------*
+FORM get_data.
+
+  CLEAR: gt_kna1,
+         gt_vbak.
+
+  SELECT kunnr,
+         name1,
+         ort01,
+         land1,
+         regio,
+         pstlz,
+         stras,
+         sortl,
+         erdat
+    FROM kna1
+    INTO TABLE @gt_kna1
+    WHERE kunnr IN @so_kunnr.
+
+  IF gt_kna1 IS NOT INITIAL.
+
+    SELECT vbeln,
+           auart,
+           kunnr,
+           vkorg,
+           vtweg,
+           spart,
+           erdat,
+           ernam,
+           audat,
+           netwr,
+           waerk
+      FROM vbak
+      INTO TABLE @gt_vbak
+      FOR ALL ENTRIES IN @gt_kna1
+      WHERE kunnr = @gt_kna1-kunnr.
+
+  ENDIF.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Module STATUS_0100 OUTPUT
+*---------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+
+  IF cust_cont IS INITIAL.
+
+    PERFORM create_container.
+    PERFORM build_fieldcat_kna1.
+    PERFORM build_fieldcat_vbak.
+    PERFORM display_kna1_alv.
+    PERFORM display_vbak_alv.
+
+  ELSE.
+
+    IF kna1_grid IS BOUND.
+      CALL METHOD kna1_grid->refresh_table_display.
+    ENDIF.
+
+    IF vbak_grid IS BOUND.
+      CALL METHOD vbak_grid->refresh_table_display.
+    ENDIF.
+
+  ENDIF.
+
+ENDMODULE.
+
+*---------------------------------------------------------------------*
+* Module USER_COMMAND_0100 INPUT
+*---------------------------------------------------------------------*
+MODULE user_command_0100 INPUT.
+
+  CASE ok_code.
+
+    WHEN 'BACK' OR 'EXIT' OR 'CANCEL'.
+      PERFORM free_objects.
+      LEAVE TO SCREEN 0.
+
+  ENDCASE.
+
+  CLEAR ok_code.
+
+ENDMODULE.
+
+*---------------------------------------------------------------------*
+* Form CREATE_CONTAINER
+*---------------------------------------------------------------------*
+FORM create_container.
+
+  CREATE OBJECT cust_cont
+    EXPORTING
+      container_name = 'CC_ALV'.
+
+  CREATE OBJECT o_split
+    EXPORTING
+      parent  = cust_cont
+      rows    = 2
+      columns = 1.
+
+  CALL METHOD o_split->get_container
+    EXPORTING
+      row       = 1
+      column    = 1
+    RECEIVING
+      container = o_cont1.
+
+  CALL METHOD o_split->get_container
+    EXPORTING
+      row       = 2
+      column    = 1
+    RECEIVING
+      container = o_cont2.
+
+  CALL METHOD o_split->set_row_height
+    EXPORTING
+      id     = 1
+      height = 40.
+
+  CALL METHOD o_split->set_row_height
+    EXPORTING
+      id     = 2
+      height = 60.
+
+  CREATE OBJECT kna1_grid
+    EXPORTING
+      i_parent = o_cont1.
+
+  CREATE OBJECT vbak_grid
+    EXPORTING
+      i_parent = o_cont2.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Form BUILD_FIELDCAT_KNA1
+*---------------------------------------------------------------------*
+FORM build_fieldcat_kna1.
+
+  DATA ls_fcat TYPE lvc_s_fcat.
+
+  CLEAR gt_fcat_kna1.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'KUNNR'.
+  ls_fcat-coltext   = 'Customer'.
+  ls_fcat-scrtext_l = 'Customer Number'.
+  ls_fcat-key       = abap_true.
+  ls_fcat-ref_table = 'KNA1'.
+  ls_fcat-ref_field = 'KUNNR'.
+  APPEND ls_fcat TO gt_fcat_kna1.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'NAME1'.
+  ls_fcat-coltext   = 'Customer Name'.
+  ls_fcat-scrtext_l = 'Customer Name'.
+  ls_fcat-ref_table = 'KNA1'.
+  ls_fcat-ref_field = 'NAME1'.
+  APPEND ls_fcat TO gt_fcat_kna1.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'ORT01'.
+  ls_fcat-coltext   = 'City'.
+  ls_fcat-ref_table = 'KNA1'.
+  ls_fcat-ref_field = 'ORT01'.
+  APPEND ls_fcat TO gt_fcat_kna1.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'LAND1'.
+  ls_fcat-coltext   = 'Country'.
+  ls_fcat-ref_table = 'KNA1'.
+  ls_fcat-ref_field = 'LAND1'.
+  APPEND ls_fcat TO gt_fcat_kna1.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'REGIO'.
+  ls_fcat-coltext   = 'Region'.
+  ls_fcat-ref_table = 'KNA1'.
+  ls_fcat-ref_field = 'REGIO'.
+  APPEND ls_fcat TO gt_fcat_kna1.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'PSTLZ'.
+  ls_fcat-coltext   = 'Postal Code'.
+  ls_fcat-ref_table = 'KNA1'.
+  ls_fcat-ref_field = 'PSTLZ'.
+  APPEND ls_fcat TO gt_fcat_kna1.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'STRAS'.
+  ls_fcat-coltext   = 'Street'.
+  ls_fcat-ref_table = 'KNA1'.
+  ls_fcat-ref_field = 'STRAS'.
+  APPEND ls_fcat TO gt_fcat_kna1.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'SORTL'.
+  ls_fcat-coltext   = 'Search Term'.
+  ls_fcat-ref_table = 'KNA1'.
+  ls_fcat-ref_field = 'SORTL'.
+  APPEND ls_fcat TO gt_fcat_kna1.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'ERDAT'.
+  ls_fcat-coltext   = 'Created On'.
+  ls_fcat-ref_table = 'KNA1'.
+  ls_fcat-ref_field = 'ERDAT'.
+  APPEND ls_fcat TO gt_fcat_kna1.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Form BUILD_FIELDCAT_VBAK
+*---------------------------------------------------------------------*
+FORM build_fieldcat_vbak.
+
+  DATA ls_fcat TYPE lvc_s_fcat.
+
+  CLEAR gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'VBELN'.
+  ls_fcat-coltext   = 'Sales Order'.
+  ls_fcat-key       = abap_true.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'VBELN'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'AUART'.
+  ls_fcat-coltext   = 'Order Type'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'AUART'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'KUNNR'.
+  ls_fcat-coltext   = 'Customer'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'KUNNR'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'VKORG'.
+  ls_fcat-coltext   = 'Sales Org'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'VKORG'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'VTWEG'.
+  ls_fcat-coltext   = 'Dist. Channel'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'VTWEG'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'SPART'.
+  ls_fcat-coltext   = 'Division'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'SPART'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'ERDAT'.
+  ls_fcat-coltext   = 'Created On'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'ERDAT'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'ERNAM'.
+  ls_fcat-coltext   = 'Created By'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'ERNAM'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'AUDAT'.
+  ls_fcat-coltext   = 'Document Date'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'AUDAT'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'NETWR'.
+  ls_fcat-coltext   = 'Net Value'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'NETWR'.
+  ls_fcat-cfieldname = 'WAERK'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'WAERK'.
+  ls_fcat-coltext   = 'Currency'.
+  ls_fcat-ref_table = 'VBAK'.
+  ls_fcat-ref_field = 'WAERK'.
+  APPEND ls_fcat TO gt_fcat_vbak.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Form DISPLAY_KNA1_ALV
+*---------------------------------------------------------------------*
+FORM display_kna1_alv.
+
+  gs_layout_kna1-zebra      = abap_true.
+  gs_layout_kna1-cwidth_opt = abap_true.
+  gs_layout_kna1-grid_title = 'Customer Header Data - KNA1'.
+
+  CALL METHOD kna1_grid->set_table_for_first_display
+    EXPORTING
+      is_layout       = gs_layout_kna1
+      i_save          = 'A'
+    CHANGING
+      it_outtab       = gt_kna1
+      it_fieldcatalog = gt_fcat_kna1.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Form DISPLAY_VBAK_ALV
+*---------------------------------------------------------------------*
+FORM display_vbak_alv.
+
+  gs_layout_vbak-zebra      = abap_true.
+  gs_layout_vbak-cwidth_opt = abap_true.
+  gs_layout_vbak-grid_title = 'Sales Order Data - VBAK'.
+
+  CALL METHOD vbak_grid->set_table_for_first_display
+    EXPORTING
+      is_layout       = gs_layout_vbak
+      i_save          = 'A'
+    CHANGING
+      it_outtab       = gt_vbak
+      it_fieldcatalog = gt_fcat_vbak.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Form FREE_OBJECTS
+*---------------------------------------------------------------------*
+FORM free_objects.
+
+  IF kna1_grid IS BOUND.
+    CALL METHOD kna1_grid->free.
+    CLEAR kna1_grid.
+  ENDIF.
+
+  IF vbak_grid IS BOUND.
+    CALL METHOD vbak_grid->free.
+    CLEAR vbak_grid.
+  ENDIF.
+
+  IF o_split IS BOUND.
+    CALL METHOD o_split->free.
+    CLEAR o_split.
+  ENDIF.
+
+  IF cust_cont IS BOUND.
+    CALL METHOD cust_cont->free.
+    CLEAR cust_cont.
+  ENDIF.
+
+  CALL METHOD cl_gui_cfw=>flush.
+
+ENDFORM.
