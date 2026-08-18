@@ -1,0 +1,4373 @@
+***********************************************************************
+**                    A D M I N I S T R A T I O N                     *
+***********************************************************************
+**  Program Name      : ZLRN_SEND_OUTBOUND_DOC                        *
+**  Program Title     : Document dispatch – Download & Email          *
+**  Version           : V00                                           *
+**  Created by        : Nabamit Sen                                   *
+**  Created on        : 17.11.2025                                    *
+**  Description       : Send mail and download outbound documents     *
+**  ID I              : SEDA_UK_FTD_LO_MTC32                          *
+***********************************************************************
+**                    C H A N G E  H I S T O R Y                      *
+***********************************************************************
+** Change Id   :                                                      *
+** Author      :                                                      *
+** Changed On  :                                                      *
+** Request No  :                                                      *
+** Description :                                                      *
+***********************************************************************
+
+REPORT zlrn_send_outbound_doc.
+
+INCLUDE zlrn_send_outbound_doc_top. "Declaration
+INCLUDE zlrn_send_outbound_doc_sel. "Selection screen
+INCLUDE zlrn_send_outbound_doc_imp. " class implementation
+
+
+START-OF-SELECTION.
+
+  CLEAR: gt_gi_posted, gt_gi_not_posted, gt_inv_to_del, gt_prf_to_del,gt_group, gv_group,gt_doc_output_types,gv_spoolid.
+
+  " Main extraction logic
+  lo_main = NEW lcl_main( ).
+
+  lo_main->fetch_output_types( ). " TO fetch output types from zxysvarv.
+  IF gt_doc_output_types IS INITIAL.
+    MESSAGE s056(zs_mtc_sd) DISPLAY LIKE gc_e.
+    RETURN.
+  ENDIF.
+  lo_main->fetch_documents( ). "Extraction
+
+  IF rb_dwnld = abap_true.
+    lo_main->process_download( it_group = gt_group ).
+    RETURN.
+  ELSEIF rb_email = abap_true.
+    lo_main->process_email( it_group = gt_group ).
+    RETURN.
+  ENDIF.
+
+*&---------------------------------------------------------------------*
+*&  Include           ZLRN_SEND_OUTBOUND_DOC_TOP
+*&---------------------------------------------------------------------*
+INCLUDE ole2incl."for outlook preview
+
+TABLES:likp.
+
+TYPES: BEGIN OF ty_bstnk,
+         bstnk TYPE bstnk,
+       END OF ty_bstnk.
+
+TYPES:BEGIN OF ty_vbeln,
+        vbeln TYPE   vbeln_vl,
+      END OF ty_vbeln.
+
+TYPES:BEGIN OF ty_tknum,
+        tknum TYPE tknum,
+      END OF ty_tknum.
+
+TYPES:BEGIN OF ty_vbfa_vbeln,
+        vbeln TYPE vbeln_nach,
+      END OF ty_vbfa_vbeln.
+
+TYPES:BEGIN OF ty_vbfa_1,
+        vbeln TYPE vbeln_nach,
+        vkorg TYPE vkorg,
+        rfbsk TYPE rfbsk,
+      END OF ty_vbfa_1.
+TYPES:BEGIN OF ty_alv,
+        check_box TYPE char1,
+        document  TYPE string,
+        group     TYPE string,
+        doc_cat   TYPE string,
+        doc_id    TYPE string,
+      END OF ty_alv.
+
+TYPES: BEGIN OF ty_mkpf_map,
+         mblnr TYPE mblnr,
+         mjahr TYPE mjahr,
+         xblnr TYPE xblnr1,
+       END OF ty_mkpf_map.
+
+TYPES: BEGIN OF ty_bkpf_map,
+         bukrs TYPE bukrs,
+         belnr TYPE belnr_d,
+         gjahr TYPE gjahr,
+         awkey TYPE awkey,
+       END OF ty_bkpf_map.
+
+TYPES: BEGIN OF ty_sel,
+         sign   TYPE ddsign,
+         option TYPE ddoption,
+         low    TYPE adr6-smtp_addr,
+         high   TYPE adr6-smtp_addr,
+       END OF ty_sel.
+
+TYPES:BEGIN OF ty_attachment,
+        type    TYPE so_obj_tp,
+        subject TYPE so_obj_des,
+        content TYPE tline,
+      END OF ty_attachment.
+
+
+TYPES: BEGIN OF ty_group,
+         doc_typ TYPE char10,
+         doc_no  TYPE char10,
+         group   TYPE i,
+       END OF ty_group.
+
+TYPES: BEGIN OF ty_doc_output_type,
+         doc_key     TYPE string,
+         output_type TYPE string,
+         ka          TYPE kappl,
+         nacha       TYPE na_nacha,
+       END OF ty_doc_output_type.
+
+" Invoice/Proforma -> Delivery relations (filled from VBFA during extraction)
+TYPES: BEGIN OF ty_inv_del_map,
+         inv TYPE vbrk-vbeln,      " billing/proforma number
+         del TYPE likp-vbeln,      " linked delivery
+       END OF ty_inv_del_map.
+
+TYPES: BEGIN OF ty_vbeln_gi,
+         vbeln TYPE likp-vbeln,
+       END OF ty_vbeln_gi.
+
+"---------------------------------------------
+" Grouping key
+"---------------------------------------------
+TYPES: BEGIN OF ty_group_key,
+         doc_typ TYPE char10,
+         doc_no  TYPE char10,
+       END OF ty_group_key.
+
+TYPES: BEGIN OF ty_vbfa_link,
+         vbelv   TYPE vbeln_von,
+         posnv   TYPE posnr_von,
+         vbeln   TYPE vbeln_nach,
+         posnn   TYPE posnr_nach,
+         vbtyp_n TYPE vbtyp_n,
+       END OF ty_vbfa_link.
+
+TYPES: BEGIN OF ty_likp_final,
+         vbeln TYPE likp-vbeln,
+         lfart TYPE likp-lfart,
+       END OF ty_likp_final,
+
+       BEGIN OF ty_b012,
+         kschl TYPE kschl,
+         lfart TYPE lfart,
+       END OF ty_b012.
+
+TYPES ty_vbfa_link_tab TYPE STANDARD TABLE OF ty_vbfa_link WITH EMPTY KEY.
+
+TYPES:
+  ty_vbeln_tab      TYPE STANDARD TABLE OF ty_vbeln WITH EMPTY KEY,
+  ty_bstnk_tab      TYPE STANDARD TABLE OF bstnk WITH EMPTY KEY,
+  ty_vbldel_tab     TYPE STANDARD TABLE OF vbeln_vl WITH EMPTY KEY,
+  ty_tknum_tab      TYPE STANDARD TABLE OF ty_tknum WITH EMPTY KEY,
+  ty_vbbill_tab     TYPE STANDARD TABLE OF vbeln_vf WITH EMPTY KEY,
+  ty_vbprof_tab     TYPE STANDARD TABLE OF vbeln_vf WITH EMPTY KEY,
+  ty_belnr_tab      TYPE STANDARD TABLE OF belnr_d WITH EMPTY KEY,
+  ty_vbfa_vbeln_tab TYPE STANDARD TABLE OF ty_vbfa_vbeln WITH EMPTY KEY,
+  ty_vbfa_tab_1     TYPE STANDARD TABLE OF ty_vbfa_1 WITH EMPTY KEY,
+  ty_group_tt       TYPE STANDARD TABLE OF ty_group.
+
+TYPES: ty_sel_tab    TYPE STANDARD TABLE OF ty_sel WITH DEFAULT KEY,
+       ty_tline_tab  TYPE STANDARD TABLE OF tline,
+       ty_string_tab TYPE STANDARD TABLE OF string.
+
+DATA: gt_group TYPE TABLE OF ty_group.
+DATA: gt_view_delivery TYPE ty_vbeln_tab,
+      gt_view_shipment TYPE ty_tknum_tab,
+      gt_view_invoice  TYPE ty_vbfa_vbeln_tab,
+      gt_view_proforma TYPE ty_vbfa_vbeln_tab.
+
+DATA: gv_vbeln1 TYPE vbeln_va,
+      gv_bstnk1 TYPE bstnk,
+      gv_tknum1 TYPE tknum,
+      gv_vbeln2 TYPE vbeln_vf,
+      gv_belnr1 TYPE belnr_d,
+      gv_smtp1  TYPE ad_smtpadr.
+
+DATA: gv_group TYPE i.
+
+DATA : gt_inv_to_del TYPE STANDARD TABLE OF ty_inv_del_map WITH EMPTY KEY,
+       gt_prf_to_del TYPE STANDARD TABLE OF ty_inv_del_map WITH EMPTY KEY.
+DATA : gt_gi_posted     TYPE STANDARD TABLE OF ty_vbeln_gi WITH EMPTY KEY,
+       gt_gi_not_posted TYPE STANDARD TABLE OF ty_vbeln_gi WITH EMPTY KEY,
+       gt_likp_final    TYPE STANDARD TABLE OF ty_likp_final WITH EMPTY KEY,
+       gt_b012          TYPE STANDARD TABLE OF ty_b012 WITH EMPTY KEY.
+
+
+DATA: gt_mkpf_by_xblnr TYPE STANDARD TABLE OF ty_mkpf_map WITH EMPTY KEY,
+      gt_bkpf_by_awkey TYPE STANDARD TABLE OF ty_bkpf_map WITH EMPTY KEY.
+
+DATA: gt_doc_output_types TYPE STANDARD TABLE OF ty_doc_output_type WITH EMPTY KEY.
+
+
+DATA: gt_alv       TYPE STANDARD TABLE OF ty_alv,
+      gs_alv       TYPE ty_alv,
+      gt_fcat      TYPE lvc_t_fcat,
+      gs_fcat      TYPE lvc_s_fcat,
+      gs_layout    TYPE lvc_s_layo,
+      g_container  TYPE REF TO cl_gui_custom_container,
+      g_grid       TYPE REF TO cl_gui_alv_grid,
+      gv_spoolid   TYPE rspoid,
+      gv_spoolid_1 TYPE rspoid.
+
+
+CONSTANTS: gc_retfield  TYPE dfies-fieldname VALUE 'BSTNK',
+           gc_value_org TYPE ddbool_d VALUE 'S',
+           gc_progname  TYPE progname VALUE 'ZLRN_SEND_OUTBOUND_DOC',
+           gc_type      TYPE rsscr_kind VALUE 'P',
+           gc_j         TYPE vbtyp_n VALUE 'J',
+           gc_c         TYPE wbstk VALUE 'C',
+           gc_dot       TYPE c VALUE '.', "++Added by Ragni on 30Jul2026
+           gc_8         TYPE vbtyp_n VALUE '8',
+           gc_m         TYPE vbtyp_n VALUE 'M',
+           gc_u         TYPE vbtyp_n VALUE 'U',
+           gc_e         TYPE char1 VALUE 'E',
+           gc_x         TYPE char1 VALUE 'X',
+           gc_check_box TYPE lvc_fname VALUE 'CHECK_BOX',
+           gc_document  TYPE lvc_fname VALUE 'DOCUMENT',
+           gc_group     TYPE lvc_fname VALUE 'GROUP',
+           gc_rfbsk_e   TYPE rfbsk VALUE 'E',
+           gc_i         TYPE char1 VALUE 'I',
+           gc_eq        TYPE ddoption VALUE 'EQ',
+           gc_separator TYPE char2  VALUE ', ',
+           gc_sub       TYPE c VALUE 'S', "++Added by Ragni Chandrawanshi on 03Mar2026
+           gc_body      TYPE c VALUE 'B', "++Added by Ragni Chandrawanshi on 03Mar2026
+           gc_kschl     TYPE na_kschl VALUE 'ZK1R',
+           gc_kappl     TYPE kappl VALUE 'ME'.
+
+
+" --- File category tokens used by build_filename CASE ---
+CONSTANTS: gc_cat_dlvn    TYPE string VALUE 'DELIVERY_NOTE',
+           gc_cat_pklst   TYPE string VALUE 'PACKING_LIST',
+           gc_cat_cmr     TYPE string VALUE 'CMR',
+           gc_cat_shprq   TYPE string VALUE 'SHIPMENT_REQUEST',
+           gc_cat_ldlst   TYPE string VALUE 'LOADING_LIST',
+           gc_cat_sinv    TYPE string VALUE 'SALES_INVOICE',
+           gc_cat_billdoc TYPE string VALUE 'BILLING_DOCUMENT',
+           gc_cat_prfin   TYPE string VALUE 'PROFORMA_INVOICE',
+           gc_sep         TYPE string VALUE '_'.
+
+CONSTANTS : c_ship  TYPE char10 VALUE 'SHIPMENT',
+            c_pro   TYPE char10 VALUE 'PROFORMA',
+            c_deliv TYPE char10 VALUE 'DELIVERY',
+            c_sinv  TYPE char10 VALUE 'SINVOICE'.
+
+
+CLASS lcl_main DEFINITION FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      validate_input,
+
+      show_f4_bstnk
+        IMPORTING iv_field TYPE dynfnam,
+
+      get_current_user_email
+        RETURNING VALUE(rv_email) TYPE ad_smtpadr,
+
+      fetch_output_types,
+
+      extract_from_so_input
+        IMPORTING it_so TYPE ty_vbeln_tab,
+
+      extract_delivery
+        IMPORTING it_delivery TYPE ty_vbeln_tab,
+      extract_shipment
+        IMPORTING it_shipment TYPE ty_tknum_tab,
+      extract_invoice
+        IMPORTING it_invoice TYPE ty_vbfa_tab_1,
+      extract_accounting,
+      fetch_documents,
+
+      download_single_pdf
+        IMPORTING
+                  iv_docnum       TYPE any
+                  iv_doc_category TYPE string
+                  iv_key          TYPE string
+                  iv_folder       TYPE string OPTIONAL
+        RETURNING VALUE(rv_ok)    TYPE abap_bool,
+
+
+      preload_mkpf_for_deliveries
+        IMPORTING it_delivery TYPE ty_vbeln_tab,
+
+      preload_bkpf_for_billings
+        IMPORTING it_billing TYPE ty_vbfa_vbeln_tab,
+      get_billto_name
+        IMPORTING iv_vbrk        TYPE vbrk-vbeln
+        RETURNING VALUE(rv_name) TYPE string,
+
+      build_filename
+        IMPORTING
+                  iv_doc_category TYPE string
+                  iv_docnum       TYPE any
+        RETURNING VALUE(rv_name)  TYPE string,
+
+      build_fullpath
+        IMPORTING iv_dir         TYPE string
+                  iv_name        TYPE string
+        RETURNING VALUE(rv_full) TYPE string,
+      get_deliveries_without_gi
+        IMPORTING
+          it_delivery TYPE ty_vbeln_tab
+        EXPORTING
+          et_no_gi    TYPE ty_string_tab,
+      try_generate_pdf_tline
+        IMPORTING
+                  iv_docnum       TYPE any
+                  iv_doc_category TYPE string
+                  iv_key          TYPE string
+        EXPORTING
+                  et_solix        TYPE solix_tab
+                  ev_size         TYPE i
+
+                  ev_msg          TYPE string
+        RETURNING VALUE(rv_ok)    TYPE abap_bool,
+
+      " --- Build one email attachment from a doc (uses above converters) ---
+      generate_attachment
+        IMPORTING
+                  iv_docnum        TYPE any
+                  iv_doc_category  TYPE string
+                  iv_key           TYPE string
+        EXPORTING
+                  ev_size          TYPE i
+        RETURNING VALUE(rs_attach) TYPE zattachement,
+
+
+      process_download
+        IMPORTING
+          it_group TYPE ty_group_tt,
+      process_email
+        IMPORTING
+          it_group TYPE ty_group_tt,
+      get_so10_text
+        IMPORTING iv_name TYPE tdobname
+        EXPORTING et_text TYPE bcsy_text,
+
+      bcsy_to_string
+        IMPORTING it_text          TYPE bcsy_text
+        RETURNING VALUE(rv_string) TYPE string,
+
+      csv_from_sels
+        IMPORTING it_sels       TYPE ty_sel_tab
+        RETURNING VALUE(rv_csv) TYPE string,
+
+      fill_alv_documents
+        IMPORTING
+          it_group TYPE ty_group_tt,
+      normalize_id
+        IMPORTING iv_any        TYPE any
+        RETURNING VALUE(rv_txt) TYPE string,
+
+
+      is_gi_required
+        IMPORTING iv_cat        TYPE string
+        RETURNING VALUE(rv_yes) TYPE abap_bool,
+
+      gi_block_if_needed
+        IMPORTING iv_cat          TYPE string
+                  iv_id           TYPE any  " delivery / invoice / proforma / shipment id
+                  iv_key          TYPE string OPTIONAL
+        RETURNING VALUE(rv_block) TYPE abap_bool,
+      can_download_any
+        RETURNING VALUE(rv_can) TYPE abap_bool,
+      display_alv,
+*BOI by Ragni Chandrawanshi on 27Feb2026
+      get_text_name
+        IMPORTING iv_type TYPE c
+        EXPORTING ev_name TYPE tdobname.
+*EOI by Ragni Chandrawanshi on 27Feb2026
+  PRIVATE SECTION.
+    DATA:
+      gt_bstnk       TYPE TABLE OF ty_bstnk,
+      gv_pack_outtyp TYPE kschl.
+
+
+
+    METHODS:
+      add_group_anchor
+        IMPORTING
+          is_key TYPE ty_group_key,
+
+      append_ship_deliv_bills
+        IMPORTING
+          iv_tknum              TYPE char10
+          it_vbfa_linked        TYPE ty_vbfa_link_tab
+          it_vbfa_invoice_valid TYPE ty_vbfa_link_tab,
+
+      append_bills_for_delivery
+        IMPORTING
+          iv_delivery_vbeln     TYPE char10
+          it_vbfa_invoice_valid TYPE ty_vbfa_link_tab.
+
+
+
+ENDCLASS.
+
+
+*&---------------------------------------------------------------------*
+*&  Include           ZLRN_SEND_OUTBOUND_DOC_SEL
+*&---------------------------------------------------------------------*
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-001.
+
+PARAMETERS: p_tplst TYPE tplst OBLIGATORY MATCHCODE OBJECT h_ttds,
+            p_vkorg TYPE vkorg OBLIGATORY.
+
+SELECTION-SCREEN END OF BLOCK b1.
+
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE text-024.
+SELECT-OPTIONS: s_vbeln  FOR gv_vbeln1 MATCHCODE OBJECT vmva,       " Sales Order
+                s_bstnk  FOR gv_bstnk1 ,                            " Customer PO
+                s_vbldel FOR likp-vbeln,                            " Delivery
+                s_tknum  FOR gv_tknum1,                             " Shipment
+                s_vbbill FOR gv_vbeln2 MATCHCODE OBJECT F4_VBRK,    " Billing
+                s_vbprof FOR gv_vbeln2 MATCHCODE OBJECT F4_VBRK,    " Proforna
+                s_belnr  FOR gv_belnr1 MATCHCODE OBJECT vf_bkpf.    " Accounting
+SELECTION-SCREEN END OF BLOCK b2.
+
+SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE text-002.
+
+PARAMETERS: cb_dlvnt AS CHECKBOX USER-COMMAND doc DEFAULT gc_x,     " Delivery Note
+            cb_pklst AS CHECKBOX USER-COMMAND doc DEFAULT gc_x,     " Packing List
+            cb_cmr   AS CHECKBOX USER-COMMAND doc DEFAULT gc_x,     " CMR
+            cb_shprq AS CHECKBOX USER-COMMAND doc DEFAULT gc_x,     " Shipment Request
+            cb_ldlst AS CHECKBOX USER-COMMAND doc DEFAULT gc_x,     " Loading List
+            cb_prfin AS CHECKBOX USER-COMMAND doc DEFAULT gc_x,     " Proforma Invoice
+            cb_sinv  AS CHECKBOX USER-COMMAND doc DEFAULT gc_x.     " Sales Invoice
+SELECTION-SCREEN END OF BLOCK b3.
+
+SELECTION-SCREEN BEGIN OF BLOCK b4 WITH FRAME TITLE text-003.
+PARAMETERS: rb_dwnld RADIOBUTTON GROUP act DEFAULT 'X' USER-COMMAND r1.
+PARAMETERS: p_dlpath TYPE string MODIF ID dlp,
+            rb_email RADIOBUTTON GROUP act.
+
+PARAMETERS: p_sender TYPE ad_smtpadr  MODIF ID eml.
+
+SELECT-OPTIONS: s_rcv FOR gv_smtp1 NO INTERVALS MODIF ID eml,
+                s_cc FOR gv_smtp1 NO INTERVALS MODIF ID eml.
+PARAMETERS: p_prev   AS CHECKBOX DEFAULT ' ' MODIF ID eml.
+SELECTION-SCREEN END OF BLOCK b4.
+
+SELECTION-SCREEN BEGIN OF BLOCK b5 WITH FRAME TITLE text-004.
+
+" Delivery Note
+SELECTION-SCREEN COMMENT /1(20) text-005 MODIF ID dn1.
+PARAMETERS: rb_dlvn1 RADIOBUTTON GROUP gdn1  MODIF ID dn1,
+            rb_dlvn2 RADIOBUTTON GROUP gdn1 DEFAULT 'X' MODIF ID dn1.
+
+" Packing List
+SELECTION-SCREEN COMMENT /1(20) text-006 MODIF ID pl1.
+PARAMETERS: rb_pkls1 RADIOBUTTON GROUP gpl1  MODIF ID pl1,
+            rb_pkls2 RADIOBUTTON GROUP gpl1 DEFAULT 'X' MODIF ID pl1.
+
+" CMR
+SELECTION-SCREEN COMMENT /1(20) text-007 MODIF ID cmr.
+PARAMETERS: rb_cmr1 RADIOBUTTON GROUP gcmr DEFAULT 'X' MODIF ID cmr,
+            rb_cmr2 RADIOBUTTON GROUP gcmr MODIF ID cmr,
+            rb_cmr3 RADIOBUTTON GROUP gcmr MODIF ID cmr.
+
+" Sales Invoice
+SELECTION-SCREEN COMMENT /1(20) text-008 MODIF ID si1.
+PARAMETERS: rb_sinv1 RADIOBUTTON GROUP gsi1 MODIF ID si1,
+            rb_sinv2 RADIOBUTTON GROUP gsi1  DEFAULT 'X' MODIF ID si1,
+            cb_sivnp RADIOBUTTON GROUP gsi1 MODIF ID si1,
+            rb_sinv4 RADIOBUTTON GROUP gsi1 MODIF ID si1.
+
+SELECTION-SCREEN END OF BLOCK b5.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR s_bstnk-low.
+
+  DATA(lo_main) = NEW lcl_main( ).
+  lo_main->show_f4_bstnk( iv_field = 'S_BSTNK-LOW' ).
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR s_bstnk-high.
+
+  DATA(lo_main) = NEW lcl_main( ).
+  lo_main->show_f4_bstnk( iv_field = 'S_BSTNK-HIGH' ).
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_dlpath.
+  DATA lv_folder TYPE string.
+
+  " Open standard frontend folder chooser;
+  CALL METHOD cl_gui_frontend_services=>directory_browse
+    CHANGING
+      selected_folder      = lv_folder
+    EXCEPTIONS
+      cntl_error           = 1
+      error_no_gui         = 2
+      not_supported_by_gui = 3
+      OTHERS               = 4.
+  IF sy-subrc <> 0.
+    clear lv_folder.
+  ENDIF.
+
+  IF lv_folder IS NOT INITIAL.
+    p_dlpath = lv_folder.
+  ENDIF.
+
+AT SELECTION-SCREEN OUTPUT.
+
+  IF rb_dwnld IS  INITIAL.
+
+    LOOP AT SCREEN.
+      IF screen-group1 = 'EML'.
+        screen-active  = 1.   " Show email fields
+      ENDIF.
+      MODIFY SCREEN.
+    ENDLOOP.
+
+    LOOP AT SCREEN.
+      IF screen-group1 = 'DLP'.
+        screen-active  = 0.   " Hide email fields
+      ENDIF.
+      MODIFY SCREEN.
+    ENDLOOP.
+
+  ELSE.
+
+    LOOP AT SCREEN.
+      IF screen-group1 = 'EML'.
+        screen-active  = 0.   " Hide email fields
+      ENDIF.
+      MODIFY SCREEN.
+    ENDLOOP.
+    LOOP AT SCREEN.
+      IF screen-group1 = 'DLP'.
+        screen-active  = 1.   " Hide email fields
+      ENDIF.
+      MODIFY SCREEN.
+    ENDLOOP.
+
+  ENDIF.
+
+  LOOP AT SCREEN.
+    CASE screen-group1.
+      WHEN 'DN1'.  " Delivery Note radios
+        IF cb_dlvnt = gc_x.
+          screen-active = 1.
+        ELSE.
+          screen-active = 0.
+        ENDIF.
+        MODIFY SCREEN.
+
+      WHEN 'PL1'.  " Packing List radios
+        IF cb_pklst = gc_x.
+          screen-active = 1.
+        ELSE.
+          screen-active = 0.
+        ENDIF.
+        MODIFY SCREEN.
+
+      WHEN 'CMR'.  " CMR radios
+        IF cb_cmr = gc_x.
+          screen-active = 1.
+        ELSE.
+          screen-active = 0.
+        ENDIF.
+        MODIFY SCREEN.
+
+      WHEN 'SI1'.  " Sales Invoice radios + checkbox
+        IF cb_sinv = gc_x.
+          screen-active = 1.
+        ELSE.
+          screen-active = 0.
+        ENDIF.
+        MODIFY SCREEN.
+    ENDCASE.
+  ENDLOOP.
+
+
+AT SELECTION-SCREEN.
+  DATA(lo_main) = NEW lcl_main( ).
+  lo_main->validate_input(  ).
+
+INITIALIZATION.
+  DATA(lo_main) = NEW lcl_main( ).
+  IF p_sender IS INITIAL.
+    p_sender = lo_main->get_current_user_email( ).
+  ENDIF.
+
+
+*&---------------------------------------------------------------------*
+*&  Include           ZLRN_SEND_OUTBOUND_DOC_IMP
+*&---------------------------------------------------------------------*
+CLASS lcl_main IMPLEMENTATION.
+
+  METHOD validate_input.
+    CONSTANTS:lc_ucomm_execute TYPE sy-ucomm VALUE 'ONLI',
+              lc_int           TYPE sx_addrtyp VALUE 'INT'.
+
+    DATA:ls_unstruct     TYPE sx_address,
+         lv_normal       TYPE sx_address,
+         lv_invalid_mail TYPE string.
+
+    IF sy-ucomm CP '%*'.
+      RETURN.
+    ENDIF.
+
+    IF s_vbeln[] IS INITIAL AND
+         s_bstnk[] IS INITIAL AND
+         s_vbldel[] IS INITIAL AND
+         s_tknum[]  IS INITIAL AND
+         s_vbbill[] IS INITIAL AND
+         s_vbprof[] IS INITIAL AND
+         s_belnr[]  IS INITIAL.
+      MESSAGE e035(zs_mtc_sd).
+    ENDIF.
+
+    IF cb_dlvnt IS INITIAL AND cb_pklst IS INITIAL AND cb_cmr IS INITIAL AND
+         cb_shprq IS INITIAL AND cb_ldlst IS INITIAL AND
+         cb_sinv IS INITIAL AND cb_prfin IS INITIAL.
+      MESSAGE e055(zs_mtc_sd) .
+    ENDIF.
+
+    IF rb_dwnld = abap_true AND p_dlpath IS INITIAL AND sy-ucomm = lc_ucomm_execute.
+      MESSAGE e065(zs_mtc_sd) .
+    ELSEIF rb_email = abap_true AND sy-ucomm = lc_ucomm_execute.
+      IF p_sender IS INITIAL.
+        MESSAGE e058(zs_mtc_sd).
+      ELSE.
+        CLEAR: ls_unstruct,lv_normal.
+        ls_unstruct-type = lc_int.
+        ls_unstruct-address = p_sender.
+        CALL FUNCTION 'SX_INTERNET_ADDRESS_TO_NORMAL'
+          EXPORTING
+            address_unstruct    = ls_unstruct
+            complete_address    = abap_true
+          IMPORTING
+            address_normal      = lv_normal
+          EXCEPTIONS
+            error_address_type  = 1
+            error_address       = 2
+            error_group_address = 3
+            OTHERS              = 4.
+        IF sy-subrc <> 0.
+          MESSAGE e068(zs_mtc_sd) WITH p_sender.
+        ENDIF.
+      ENDIF.
+      CLEAR lv_invalid_mail.
+      IF s_rcv[] IS INITIAL.
+        MESSAGE e049(zs_mtc_sd).
+      ELSE.
+        LOOP AT s_rcv[] ASSIGNING FIELD-SYMBOL(<fs_rcv>).
+          CLEAR: ls_unstruct,lv_normal.
+          ls_unstruct-type = lc_int.
+          ls_unstruct-address = <fs_rcv>-low.
+          CALL FUNCTION 'SX_INTERNET_ADDRESS_TO_NORMAL'
+            EXPORTING
+              address_unstruct    = ls_unstruct
+              complete_address    = abap_true
+            IMPORTING
+              address_normal      = lv_normal
+            EXCEPTIONS
+              error_address_type  = 1
+              error_address       = 2
+              error_group_address = 3
+              OTHERS              = 4.
+          IF sy-subrc <> 0.
+            IF lv_invalid_mail IS INITIAL.
+              lv_invalid_mail = <fs_rcv>-low.
+            ELSE.
+              lv_invalid_mail = lv_invalid_mail && gc_separator && <fs_rcv>-low.
+            ENDIF.
+          ENDIF.
+
+        ENDLOOP.
+        IF lv_invalid_mail IS NOT INITIAL.
+          MESSAGE e066(zs_mtc_sd) WITH lv_invalid_mail.
+        ENDIF.
+      ENDIF.
+      IF s_cc[] IS NOT INITIAL.
+        CLEAR lv_invalid_mail.
+        LOOP AT s_cc[] ASSIGNING FIELD-SYMBOL(<fs_cc>).
+          CLEAR: ls_unstruct,lv_normal.
+          ls_unstruct-type = lc_int.
+          ls_unstruct-address = <fs_cc>-low.
+          CALL FUNCTION 'SX_INTERNET_ADDRESS_TO_NORMAL'
+            EXPORTING
+              address_unstruct    = ls_unstruct
+              complete_address    = abap_true
+            IMPORTING
+              address_normal      = lv_normal
+            EXCEPTIONS
+              error_address_type  = 1
+              error_address       = 2
+              error_group_address = 3
+              OTHERS              = 4.
+          IF sy-subrc <> 0.
+            IF lv_invalid_mail IS INITIAL.
+              lv_invalid_mail = <fs_cc>-low.
+            ELSE.
+              lv_invalid_mail = lv_invalid_mail && gc_separator && <fs_cc>-low.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+        IF lv_invalid_mail IS NOT INITIAL.
+          MESSAGE e067(zs_mtc_sd) WITH lv_invalid_mail.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD show_f4_bstnk.
+
+    DATA: lt_return TYPE TABLE OF ddshretval.
+
+    IF gt_bstnk IS INITIAL.
+      SELECT vbeln, bstnk
+      FROM vbak                                        "#EC CI_NOFIELD.
+      INTO TABLE @DATA(lt_sh_hlp)
+      WHERE bstnk NE @space
+      AND  bstnk  IS NOT NULL.
+
+      gt_bstnk = VALUE #( FOR wa IN lt_sh_hlp ( bstnk = wa-bstnk ) ).
+
+      SORT gt_bstnk BY bstnk.
+      DELETE ADJACENT DUPLICATES FROM gt_bstnk COMPARING bstnk.
+    ENDIF.
+
+    CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+      EXPORTING
+        retfield    = gc_retfield
+        dynpprog    = sy-repid
+        dynpnr      = sy-dynnr
+        dynprofield = iv_field
+        value_org   = gc_value_org
+      TABLES
+        value_tab   = gt_bstnk
+        return_tab  = lt_return
+      EXCEPTIONS
+        OTHERS      = 1.
+
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty  NUMBER sy-msgno
+                          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD get_current_user_email.
+    DATA: ls_address TYPE bapiaddr3,
+          lt_return  TYPE TABLE OF bapiret2.
+
+
+    CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+      EXPORTING
+        username = sy-uname
+      IMPORTING
+        address  = ls_address
+      TABLES
+        return   = lt_return.
+
+
+    IF ls_address-e_mail IS NOT INITIAL.
+
+      rv_email = ls_address-e_mail.
+    ELSE.
+      rv_email = space.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD fetch_output_types.
+
+    DATA:      lt_doc_types     TYPE RANGE OF rvari_vnam,
+               lt_temp_zxysvarv TYPE RANGE OF na_kschl.
+
+
+    IF cb_dlvnt = gc_x.
+      APPEND VALUE #( sign = gc_i option = gc_eq low = |{ gc_cat_dlvn }{ gc_sep }{ p_vkorg }| )
+       TO lt_doc_types.
+    ENDIF.
+    IF cb_pklst = gc_x.
+      APPEND VALUE #( sign = gc_i option = gc_eq low = |{ gc_cat_pklst }{ gc_sep }{ p_vkorg }| )
+      TO lt_doc_types.
+    ENDIF.
+    IF cb_cmr   = gc_x.
+      APPEND VALUE #( sign = gc_i option = gc_eq low = |{ gc_cat_cmr }{ gc_sep }{ p_vkorg }| )
+      TO lt_doc_types.
+    ENDIF.
+    IF cb_sinv  = gc_x.
+      APPEND VALUE #( sign = gc_i option = gc_eq low = |{ gc_cat_billdoc }{ gc_sep }{ p_vkorg }| )
+       TO lt_doc_types.
+    ENDIF.
+    IF cb_prfin = gc_x.
+      APPEND VALUE #( sign = gc_i option = gc_eq low = |{ gc_cat_prfin }{ gc_sep }{ p_vkorg }| )
+      TO lt_doc_types.
+    ENDIF.
+    IF cb_shprq = gc_x.
+      APPEND VALUE #( sign = gc_i option = gc_eq low = |{ gc_cat_shprq }{ gc_sep }{ p_tplst }| )
+      TO lt_doc_types.
+    ENDIF.
+    IF cb_ldlst = gc_x.
+      APPEND VALUE #( sign = gc_i option = gc_eq low = |{ gc_cat_ldlst }{ gc_sep }{ p_tplst }| )
+      TO lt_doc_types.
+    ENDIF.
+
+    IF lt_doc_types IS NOT INITIAL.
+
+      SELECT progname, name, type, numb, low
+        FROM zxysvarv
+        INTO TABLE @DATA(lt_zxysvarv)
+        WHERE progname = @gc_progname
+          AND name     IN @lt_doc_types
+          AND type     = @gc_type
+          AND low      <> @space.
+
+      IF sy-subrc = 0.
+        SORT lt_zxysvarv BY low.
+      ENDIF.
+    ENDIF.
+
+    LOOP AT lt_zxysvarv ASSIGNING FIELD-SYMBOL(<fs_zxy>).
+      APPEND VALUE #( sign = gc_i option = gc_eq low = <fs_zxy>-low ) TO lt_temp_zxysvarv.
+*BOI of Ragni Chandrawanshi on 26Mar2026
+      IF <fs_zxy>-name CS gc_cat_pklst.
+        gv_pack_outtyp = <fs_zxy>-low.
+      ENDIF.
+*EOI of Ragni Chandrawanshi on 26Mar2026
+    ENDLOOP.
+
+    IF <fs_zxy> IS ASSIGNED.
+      UNASSIGN <fs_zxy>.
+    ENDIF.
+
+    IF lt_temp_zxysvarv IS NOT INITIAL.
+      SORT lt_temp_zxysvarv BY low.
+      DELETE ADJACENT DUPLICATES FROM lt_temp_zxysvarv COMPARING low.
+
+      SELECT kschl,nacha,kappl
+      FROM tnapr
+      INTO TABLE @DATA(lt_tnapr)
+      WHERE kschl IN @lt_temp_zxysvarv.
+
+      IF sy-subrc = 0.
+        DELETE lt_tnapr WHERE kappl IS INITIAL.
+        SORT lt_tnapr BY kschl kappl.
+      ENDIF.
+    ENDIF.
+
+    CLEAR gt_doc_output_types.
+
+
+    LOOP AT lt_zxysvarv ASSIGNING FIELD-SYMBOL(<fs_doc>).
+      READ TABLE lt_tnapr TRANSPORTING NO FIELDS
+             WITH KEY kschl = <fs_doc>-low
+             BINARY SEARCH.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_index) = sy-tabix.
+      LOOP AT lt_tnapr ASSIGNING FIELD-SYMBOL(<fs_tnapr>) FROM lv_index.
+
+        IF <fs_tnapr>-kschl <> <fs_doc>-low.
+          EXIT.
+        ENDIF.
+
+        gt_doc_output_types = VALUE #( BASE gt_doc_output_types (
+            doc_key     = <fs_doc>-name
+            output_type = <fs_doc>-low
+            ka          = <fs_tnapr>-kappl
+            nacha       = <fs_tnapr>-nacha
+        ) ).
+      ENDLOOP.
+    ENDLOOP.
+
+    DELETE gt_doc_output_types WHERE ka EQ gc_kappl. "output_type EQ gc_kschl
+*                                 AND ka EQ gc_kappl.
+
+    IF gt_doc_output_types IS NOT INITIAL.
+      SORT gt_doc_output_types BY  doc_key output_type  ka.
+      DELETE ADJACENT DUPLICATES FROM gt_doc_output_types COMPARING  doc_key output_type ka.
+*      SORT gt_doc_output_types BY doc_key.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+
+  "---------------------METHOD extract_from_so_input.----------------------
+  METHOD extract_from_so_input.
+
+    DATA: lv_missing_delivery TYPE string,
+          lv_missing_shipment TYPE string,
+          lt_missing_delivery TYPE TABLE OF string,
+          lt_missing_shipment TYPE TABLE OF string,
+          lt_bill_vbfa_valid  TYPE ty_vbfa_link_tab.
+
+    CLEAR lt_bill_vbfa_valid.
+
+    "--------------------------------------------
+    " 1. Extract Deliveries (LIKP) via VBFA
+    "--------------------------------------------
+    IF it_so IS NOT INITIAL.
+      DATA(lt_so_vbeln) = VALUE ty_vbeln_tab(
+  FOR <fs> IN it_so ( vbeln = <fs>-vbeln ) ).
+      SORT lt_so_vbeln BY vbeln.
+      DELETE ADJACENT DUPLICATES FROM lt_so_vbeln COMPARING vbeln.
+    ENDIF.
+    IF lt_so_vbeln IS NOT INITIAL.
+      SELECT vbelv, posnv, vbeln, posnn, vbtyp_n
+        FROM vbfa
+        INTO TABLE @DATA(lt_vbfa)
+          FOR ALL ENTRIES IN @lt_so_vbeln
+         WHERE vbelv = @lt_so_vbeln-vbeln
+          AND vbtyp_n = @gc_j.
+      IF sy-subrc = 0.
+        DATA(lt_vbfa1) = lt_vbfa.
+        SORT lt_vbfa1 BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_vbfa1 COMPARING vbeln.
+      ENDIF.
+    ENDIF.
+
+    IF lt_vbfa1 IS NOT INITIAL.
+      SELECT vbeln,vkorg
+      FROM likp
+      INTO TABLE @DATA(lt_delivery)
+      FOR ALL ENTRIES IN @lt_vbfa1
+      WHERE vbeln = @lt_vbfa1-vbeln
+        AND vkorg = @p_vkorg.
+      IF sy-subrc = 0.
+        SORT lt_delivery BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_delivery COMPARING vbeln.
+      ENDIF.
+    ELSE.
+      MESSAGE i038(zs_mtc_sd) WITH ' ' .
+    ENDIF.
+    " Collect deliveries & log missing
+    LOOP AT lt_vbfa1 ASSIGNING FIELD-SYMBOL(<fs_vbfa>).
+      READ TABLE lt_delivery TRANSPORTING NO FIELDS
+           WITH KEY vbeln = <fs_vbfa>-vbeln
+           BINARY SEARCH.
+
+      IF sy-subrc <> 0.
+        APPEND |{ <fs_vbfa>-vbeln ALPHA = OUT }| TO lt_missing_delivery.
+      ENDIF.
+    ENDLOOP.
+    IF <fs_vbfa> IS ASSIGNED.
+      UNASSIGN <fs_vbfa>.
+    ENDIF.
+    SORT lt_missing_delivery.
+    DELETE ADJACENT DUPLICATES FROM lt_missing_delivery.
+
+    CLEAR lv_missing_delivery.
+    CONCATENATE LINES OF lt_missing_delivery INTO lv_missing_delivery SEPARATED BY gc_separator.
+
+    IF lv_missing_delivery IS NOT INITIAL.
+      MESSAGE i038(zs_mtc_sd) WITH  lv_missing_delivery .
+    ENDIF.
+    "--------------------------------------------
+    " 2. Validate Goods Issue
+    "--------------------------------------------
+    IF lt_delivery IS NOT INITIAL.
+      SELECT vbeln, wbstk
+        FROM vbuk
+        INTO TABLE @DATA(lt_status)
+        FOR ALL ENTRIES IN @lt_delivery
+        WHERE vbeln = @lt_delivery-vbeln.
+      IF sy-subrc = 0.
+        SORT lt_status BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_status COMPARING vbeln.
+      ENDIF.
+
+      LOOP AT lt_delivery ASSIGNING FIELD-SYMBOL(<fs_del>).
+        READ TABLE lt_status ASSIGNING FIELD-SYMBOL(<fs_stat>)
+        WITH KEY vbeln = <fs_del>-vbeln BINARY SEARCH.
+
+        IF <fs_stat> IS NOT ASSIGNED.
+          APPEND VALUE #( vbeln = <fs_del>-vbeln ) TO gt_gi_not_posted.
+        ELSEIF <fs_stat>-wbstk <> gc_c.
+          APPEND VALUE ty_vbeln_gi( vbeln = <fs_del>-vbeln ) TO gt_gi_not_posted.
+          UNASSIGN <fs_stat>.
+        ELSE.
+          APPEND VALUE ty_vbeln_gi( vbeln = <fs_del>-vbeln ) TO gt_gi_posted.
+          UNASSIGN <fs_stat>.
+        ENDIF.
+      ENDLOOP.
+
+      SORT gt_gi_posted BY vbeln.
+      DELETE ADJACENT DUPLICATES FROM gt_gi_posted COMPARING vbeln.
+      SORT gt_gi_not_posted BY vbeln.
+      DELETE ADJACENT DUPLICATES FROM gt_gi_not_posted COMPARING vbeln.
+
+    ENDIF.
+
+    "--------------------------------------------
+    " 3. Extract Shipments (VTKK-TKNUM)
+    "--------------------------------------------
+    IF lt_delivery IS NOT INITIAL.
+      " Fetch all shipment links via VBFA
+      SELECT vbelv ,posnv,vbeln ,posnn,vbtyp_n
+        FROM vbfa
+        INTO TABLE @DATA(lt_ship_vbfa)
+        FOR ALL ENTRIES IN @lt_delivery
+        WHERE vbelv = @lt_delivery-vbeln
+        AND vbtyp_n = @gc_8.
+
+      IF sy-subrc = 0.
+        SORT lt_ship_vbfa BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_ship_vbfa COMPARING vbeln.
+      ENDIF.
+
+      " Fetch VTTK entries for shipment numbers
+      IF lt_ship_vbfa IS NOT INITIAL.
+
+        SELECT tknum, tplst
+        FROM vttk
+        INTO TABLE @DATA(lt_vttk)
+        FOR ALL ENTRIES IN @lt_ship_vbfa
+        WHERE tknum = @lt_ship_vbfa-vbeln
+        AND   tplst = @p_tplst.
+
+        IF sy-subrc = 0.
+          SORT lt_vttk BY tknum.
+          DELETE ADJACENT DUPLICATES FROM lt_vttk COMPARING tknum.
+        ENDIF.
+      ENDIF.
+
+      LOOP AT lt_ship_vbfa ASSIGNING FIELD-SYMBOL(<fs_ship>).
+        READ TABLE lt_vttk TRANSPORTING NO FIELDS WITH KEY tknum = <fs_ship>-vbeln BINARY SEARCH.
+        IF sy-subrc <> 0.
+          APPEND |{ <fs_ship>-vbeln ALPHA = OUT }| TO  lt_missing_shipment.
+        ENDIF.
+      ENDLOOP.
+
+      IF <fs_ship> IS ASSIGNED.
+        UNASSIGN <fs_ship>.
+      ENDIF.
+
+      SORT  lt_missing_shipment.
+      DELETE ADJACENT DUPLICATES FROM lt_missing_shipment.
+
+      CLEAR lv_missing_shipment.
+      CONCATENATE LINES OF lt_missing_shipment INTO lv_missing_shipment SEPARATED BY gc_separator.
+
+      IF lv_missing_shipment IS NOT INITIAL.
+        MESSAGE i039(zs_mtc_sd) WITH lv_missing_shipment.
+      ENDIF.
+
+      " Third extraction: All deliveries linked to TKNUM
+
+      IF lt_vttk IS NOT INITIAL.
+        SELECT vbelv,posnv,vbeln, posnn,vbtyp_n
+          FROM vbfa
+          INTO TABLE @DATA(lt_vbfa_linked)
+          FOR ALL ENTRIES IN @lt_vttk
+          WHERE vbeln = @lt_vttk-tknum
+            AND vbtyp_n = @gc_8.
+
+        IF  sy-subrc = 0.
+          SORT lt_vbfa_linked BY vbelv.
+          DELETE ADJACENT DUPLICATES FROM lt_vbfa_linked COMPARING vbelv.
+        ENDIF.
+
+
+        IF lt_vbfa_linked IS NOT INITIAL.
+
+          SELECT vbeln, vkorg
+              FROM likp
+              APPENDING TABLE @lt_delivery
+              FOR ALL ENTRIES IN @lt_vbfa_linked
+              WHERE vbeln = @lt_vbfa_linked-vbelv
+                AND vkorg = @p_vkorg.
+
+          IF sy-subrc = 0.
+            SORT lt_delivery BY vbeln.
+            DELETE ADJACENT DUPLICATES FROM lt_delivery COMPARING vbeln.
+
+
+            SELECT vbeln, wbstk
+              FROM vbuk
+              INTO TABLE @DATA(lt_vbuk_all)
+              FOR ALL ENTRIES IN @lt_delivery
+              WHERE vbeln = @lt_delivery-vbeln.
+
+            SORT lt_vbuk_all BY vbeln.
+
+            LOOP AT lt_delivery ASSIGNING FIELD-SYMBOL(<fs_linked_del>).
+              READ TABLE lt_vbuk_all ASSIGNING <fs_stat>
+                WITH KEY vbeln = <fs_linked_del>-vbeln BINARY SEARCH.
+
+              IF <fs_stat> IS NOT ASSIGNED.
+                APPEND VALUE ty_vbeln_gi( vbeln = <fs_linked_del>-vbeln ) TO gt_gi_not_posted.
+              ELSEIF <fs_stat> IS ASSIGNED AND <fs_stat>-wbstk <> gc_c.
+                APPEND VALUE #( vbeln = <fs_linked_del>-vbeln ) TO gt_gi_not_posted.
+                UNASSIGN <fs_stat>.
+              ELSE.
+                APPEND VALUE #( vbeln = <fs_linked_del>-vbeln ) TO gt_gi_posted.
+                UNASSIGN <fs_stat>.
+              ENDIF.
+            ENDLOOP.
+
+            SORT gt_gi_posted BY vbeln.
+            DELETE ADJACENT DUPLICATES FROM gt_gi_posted COMPARING vbeln.
+
+            SORT gt_gi_not_posted BY vbeln.
+            DELETE ADJACENT DUPLICATES FROM gt_gi_not_posted COMPARING vbeln.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+    "--------------------------------------------
+    " 4. Extract Sales / Proforma Invoices
+    "--------------------------------------------
+
+
+    IF lt_delivery IS NOT INITIAL.
+      SELECT
+          a~vbelv,
+          a~posnv,
+          a~vbeln,
+          a~posnn,
+          a~vbtyp_n
+        FROM vbfa AS a
+        INNER JOIN vbrk AS b
+          ON b~vbeln = a~vbeln
+        INTO TABLE @lt_bill_vbfa_valid
+        FOR ALL ENTRIES IN @lt_delivery
+        WHERE a~vbelv   = @lt_delivery-vbeln
+          AND a~vbtyp_n IN (@gc_m, @gc_u)
+          AND b~vkorg   = @p_vkorg
+          AND b~rfbsk  <> @gc_rfbsk_e.
+
+      IF sy-subrc = 0.
+
+        SORT lt_bill_vbfa_valid BY vbelv vbeln vbtyp_n.
+        DELETE ADJACENT DUPLICATES FROM lt_bill_vbfa_valid
+          COMPARING vbelv vbeln vbtyp_n.
+      ENDIF.
+
+      """""""for gi check for sales inv / proforma inv"""""""""""""""
+      LOOP AT lt_bill_vbfa_valid ASSIGNING FIELD-SYMBOL(<b1>).
+        IF <b1>-vbtyp_n = gc_m.      " Sales Invoice
+          APPEND VALUE ty_inv_del_map( inv = <b1>-vbeln del = <b1>-vbelv ) TO gt_inv_to_del.
+        ELSEIF <b1>-vbtyp_n = gc_u.  " Proforma
+          APPEND VALUE ty_inv_del_map( inv = <b1>-vbeln del = <b1>-vbelv ) TO gt_prf_to_del.
+        ENDIF.
+      ENDLOOP.
+
+      SORT gt_inv_to_del BY inv del.
+      DELETE ADJACENT DUPLICATES FROM gt_inv_to_del COMPARING inv del.
+      SORT gt_prf_to_del BY inv del.
+      DELETE ADJACENT DUPLICATES FROM gt_prf_to_del COMPARING inv del.
+    ENDIF.
+    """""""""""""""""""""""""""grouping"""""""""""""""""""""""""""""""""""""""
+
+
+
+    SORT lt_vbfa_linked      BY vbeln.   " for parallel cursor (shipment -> delivery)
+    SORT lt_bill_vbfa_valid  BY vbelv.   " for parallel cursor (delivery -> bill)
+
+    "------------------------------
+    " 1) Shipment-based grouping
+    "------------------------------
+    LOOP AT lt_vttk ASSIGNING FIELD-SYMBOL(<fs_vttk>).  " Shipments
+
+      me->add_group_anchor(
+        is_key = VALUE ty_group_key(
+                   doc_typ = c_ship
+                   doc_no  = <fs_vttk>-tknum
+                 )
+      ).
+
+      me->append_ship_deliv_bills(
+        iv_tknum              = <fs_vttk>-tknum
+        it_vbfa_linked        = lt_vbfa_linked
+        it_vbfa_invoice_valid = lt_bill_vbfa_valid
+      ).
+
+    ENDLOOP.
+
+    "--------------------------------------------------------
+    " 2) Fallback grouping: Deliveries WITHOUT Shipment
+    "--------------------------------------------------------
+    LOOP AT lt_delivery ASSIGNING FIELD-SYMBOL(<fs_deliv_fallback>).
+
+      "Skip deliveries already grouped via shipment logic
+      IF line_exists(
+           gt_group[
+             doc_typ = c_deliv
+             doc_no  = <fs_deliv_fallback>-vbeln
+           ]
+         ).
+        CONTINUE.
+      ENDIF.
+
+      me->add_group_anchor(
+        is_key = VALUE ty_group_key(
+                   doc_typ = c_deliv
+                   doc_no  = <fs_deliv_fallback>-vbeln
+                 )
+      ).
+
+      me->append_bills_for_delivery(
+        iv_delivery_vbeln     = <fs_deliv_fallback>-vbeln
+        it_vbfa_invoice_valid = lt_bill_vbfa_valid
+      ).
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+*
+*  "------------------------------------------------------------
+*  " Extraction for Delivery input
+*  "------------------------------------------------------------
+
+  METHOD extract_delivery.
+
+    TYPES: BEGIN OF ty_linked_del,
+             vbeln TYPE likp-vbeln,
+           END OF ty_linked_del.
+    DATA: lt_linked_del         TYPE STANDARD TABLE OF ty_linked_del,
+          lv_missing_shipment   TYPE string,
+          lt_missing_shipment   TYPE TABLE OF string,
+          lt_shipment           TYPE ty_tknum_tab,
+          lt_all_delivery       TYPE ty_vbeln_tab,
+          lt_vbfa_invoice_valid TYPE ty_vbfa_link_tab.
+
+    CLEAR lt_vbfa_invoice_valid.
+
+
+    lt_all_delivery = it_delivery.
+
+    IF it_delivery IS NOT INITIAL.
+      " 1. Goods Issue Check for input deliveries
+      SELECT vbeln, wbstk
+        FROM vbuk
+        INTO TABLE @DATA(lt_vbuk)
+        FOR ALL ENTRIES IN @it_delivery
+        WHERE vbeln = @it_delivery-vbeln.
+      IF sy-subrc = 0.
+        SORT lt_vbuk BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_vbuk COMPARING vbeln.
+      ENDIF.
+    ENDIF.
+
+    LOOP AT it_delivery ASSIGNING FIELD-SYMBOL(<fs_vbeln>).
+      READ TABLE lt_vbuk ASSIGNING FIELD-SYMBOL(<fs_vbuk>) WITH KEY vbeln = <fs_vbeln>-vbeln
+      BINARY SEARCH.
+      IF <fs_vbuk> IS NOT ASSIGNED .
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_vbeln>-vbeln ) TO gt_gi_not_posted.
+      ELSEIF <fs_vbuk>-wbstk <> gc_c.
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_vbeln>-vbeln ) TO gt_gi_not_posted.
+        UNASSIGN <fs_vbuk>.
+      ELSE.
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_vbeln>-vbeln ) TO gt_gi_posted.
+        UNASSIGN <fs_vbuk>.
+      ENDIF.
+    ENDLOOP.
+    IF <fs_vbeln> IS ASSIGNED .
+      UNASSIGN <fs_vbeln>.
+    ENDIF.
+
+    SORT gt_gi_posted BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM gt_gi_posted COMPARING vbeln.
+    SORT gt_gi_not_posted BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM gt_gi_not_posted COMPARING vbeln.
+
+    IF it_delivery IS NOT INITIAL.
+      " 2. Fetch VBFA relations for shipments, invoices, proformas
+      SELECT vbelv, posnv, vbeln, posnn, vbtyp_n
+        FROM vbfa
+         INTO TABLE @DATA(lt_vbfa_all)
+        FOR ALL ENTRIES IN @it_delivery
+        WHERE vbelv   = @it_delivery-vbeln
+         AND vbtyp_n = @gc_8.
+
+      IF sy-subrc = 0.
+        DATA(lt_vbfa_all_1) = lt_vbfa_all.
+        SORT lt_vbfa_all_1 BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_vbfa_all_1 COMPARING vbeln.
+      ENDIF.
+    ENDIF.
+    IF lt_vbfa_all_1 IS NOT INITIAL.
+      " 3. Fetch TKNUM details for shipments
+      SELECT tknum, tplst
+        FROM vttk
+        INTO TABLE @DATA(lt_vttk)
+        FOR ALL ENTRIES IN @lt_vbfa_all_1
+        WHERE tknum = @lt_vbfa_all_1-vbeln
+        AND tplst =   @p_tplst.
+
+      IF sy-subrc = 0.
+        SORT lt_vttk BY tknum.
+        DELETE ADJACENT DUPLICATES FROM lt_vttk COMPARING tknum.
+      ENDIF.
+    ENDIF.
+
+    " 4. Shipment extraction and missing shipments
+    LOOP AT lt_vbfa_all ASSIGNING FIELD-SYMBOL(<fs_vbfa>) WHERE vbtyp_n = gc_8.
+      READ TABLE lt_vttk TRANSPORTING NO FIELDS WITH KEY tknum = <fs_vbfa>-vbeln
+      BINARY SEARCH.
+      IF sy-subrc = 0.
+        APPEND VALUE #( tknum = <fs_vbfa>-vbeln ) TO lt_shipment.
+      ELSE.
+        APPEND |{ <fs_vbfa>-vbeln ALPHA = OUT }| TO lt_missing_shipment.
+      ENDIF.
+    ENDLOOP.
+    IF <fs_vbfa> IS ASSIGNED.
+      UNASSIGN <fs_vbfa>.
+    ENDIF.
+
+    SORT lt_shipment BY tknum.
+    DELETE ADJACENT DUPLICATES FROM lt_shipment COMPARING tknum.
+
+
+    SORT lt_missing_shipment.
+    DELETE ADJACENT DUPLICATES FROM lt_missing_shipment.
+
+    CLEAR lv_missing_shipment.
+
+    CONCATENATE LINES OF lt_missing_shipment INTO lv_missing_shipment SEPARATED BY gc_separator.
+    IF lv_missing_shipment IS NOT INITIAL.
+      MESSAGE i039(zs_mtc_sd) WITH lv_missing_shipment.
+    ENDIF.
+
+    " 5. Linked deliveries via TKNUM
+    IF lt_vttk IS NOT INITIAL.
+      SELECT vbelv, posnv, vbeln, posnn, vbtyp_n
+        FROM vbfa
+        INTO TABLE @DATA(lt_vbfa_linked)
+        FOR ALL ENTRIES IN @lt_vttk
+        WHERE vbeln = @lt_vttk-tknum
+          AND vbtyp_n = @gc_8.
+
+      IF sy-subrc = 0.
+        DATA(lt_vbfa_linked_1) = lt_vbfa_linked.
+        SORT lt_vbfa_linked_1 BY vbelv.
+        DELETE ADJACENT DUPLICATES FROM lt_vbfa_linked_1 COMPARING vbelv.
+      ENDIF.
+
+      IF lt_vbfa_linked_1 IS NOT INITIAL.
+        SELECT vbeln
+          FROM likp
+          INTO TABLE @lt_linked_del
+          FOR ALL ENTRIES IN @lt_vbfa_linked_1
+          WHERE vbeln = @lt_vbfa_linked_1-vbelv
+            AND vkorg = @p_vkorg.
+        IF sy-subrc = 0.
+          SORT lt_linked_del BY vbeln.
+          DELETE ADJACENT DUPLICATES FROM lt_linked_del COMPARING vbeln.
+        ENDIF.
+
+        IF lt_linked_del IS NOT INITIAL.
+          APPEND LINES OF lt_linked_del TO lt_all_delivery.
+          SORT lt_all_delivery BY vbeln.
+          DELETE ADJACENT DUPLICATES FROM lt_all_delivery COMPARING vbeln.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+    IF lt_all_delivery IS NOT INITIAL.
+      " 6. GI check for all deliveries
+      SELECT vbeln, wbstk
+        FROM vbuk
+        INTO TABLE @DATA(lt_vbuk_linked)
+        FOR ALL ENTRIES IN @lt_all_delivery
+        WHERE vbeln = @lt_all_delivery-vbeln.
+      IF sy-subrc = 0.
+        SORT lt_vbuk_linked BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_vbuk_linked COMPARING vbeln.
+      ENDIF.
+    ENDIF.
+
+    LOOP AT lt_all_delivery ASSIGNING FIELD-SYMBOL(<fs_linked_del>).
+      READ TABLE lt_vbuk_linked ASSIGNING FIELD-SYMBOL(<fs_linked_stat>)
+      WITH KEY vbeln = <fs_linked_del>-vbeln BINARY SEARCH.
+      IF <fs_linked_stat> IS NOT ASSIGNED .
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_linked_del>-vbeln ) TO gt_gi_not_posted.
+      ELSEIF <fs_linked_stat>-wbstk <> gc_c.
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_linked_del>-vbeln ) TO gt_gi_not_posted.
+        UNASSIGN <fs_linked_stat>.
+      ELSE.
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_linked_del>-vbeln ) TO gt_gi_posted.
+        UNASSIGN <fs_linked_stat>.
+      ENDIF.
+    ENDLOOP.
+    IF <fs_linked_del> IS  ASSIGNED.
+      UNASSIGN <fs_linked_del>.
+    ENDIF.
+
+    SORT gt_gi_posted BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM gt_gi_posted COMPARING vbeln.
+    SORT gt_gi_not_posted BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM gt_gi_not_posted COMPARING vbeln.
+
+*      " 7. Fetch invoice headers
+    IF lt_all_delivery IS NOT INITIAL.
+      SELECT
+          a~vbelv,
+          a~posnv,
+          a~vbeln,
+          a~posnn,
+          a~vbtyp_n
+        FROM vbfa AS a
+        INNER JOIN vbrk AS b
+          ON b~vbeln = a~vbeln
+        INTO TABLE @lt_vbfa_invoice_valid
+        FOR ALL ENTRIES IN @lt_all_delivery
+        WHERE a~vbelv   = @lt_all_delivery-vbeln
+          AND a~vbtyp_n IN (@gc_m, @gc_u)
+          AND b~vkorg   = @p_vkorg
+          AND b~rfbsk  <> @gc_rfbsk_e.
+
+      IF sy-subrc = 0.
+        SORT lt_vbfa_invoice_valid BY vbelv vbeln vbtyp_n.
+        DELETE ADJACENT DUPLICATES FROM lt_vbfa_invoice_valid
+          COMPARING vbelv vbeln vbtyp_n.
+      ENDIF.
+    ENDIF.
+
+
+    """"""""""""""""""""for gi checking""""""""""""""""""""""""""""""""
+
+    LOOP AT lt_vbfa_invoice_valid ASSIGNING FIELD-SYMBOL(<b2>).
+      CASE <b2>-vbtyp_n.
+        WHEN gc_m.
+          APPEND VALUE ty_inv_del_map( inv = <b2>-vbeln del = <b2>-vbelv ) TO gt_inv_to_del.
+        WHEN gc_u.
+          APPEND VALUE ty_inv_del_map( inv = <b2>-vbeln del = <b2>-vbelv ) TO gt_prf_to_del.
+        WHEN OTHERS.
+      ENDCASE.
+    ENDLOOP.
+
+    IF <b2> IS ASSIGNED.
+      UNASSIGN <b2>.
+    ENDIF.
+
+    SORT gt_inv_to_del BY inv del.
+    DELETE ADJACENT DUPLICATES FROM gt_inv_to_del COMPARING inv del.
+    SORT gt_prf_to_del BY inv del.
+    DELETE ADJACENT DUPLICATES FROM gt_prf_to_del COMPARING inv del.
+    """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+    """"""""""""""GROUPING"""""""""""
+
+    SORT lt_vbfa_linked        BY vbeln.  "shipment->delivery
+    SORT lt_vbfa_invoice_valid BY vbelv.  "delivery->bill
+
+    "------------------------------------
+    " Shipment loop (lt_vttk)
+    "------------------------------------
+    LOOP AT lt_vttk ASSIGNING FIELD-SYMBOL(<fs_vttk>).  " Shipments (TKNUM)
+
+      me->add_group_anchor(
+        is_key = VALUE ty_group_key(
+                   doc_typ = c_ship
+                   doc_no  = <fs_vttk>-tknum
+                 )
+      ).
+
+      me->append_ship_deliv_bills(
+        iv_tknum              = <fs_vttk>-tknum
+        it_vbfa_linked        = lt_vbfa_linked
+        it_vbfa_invoice_valid = lt_vbfa_invoice_valid
+      ).
+
+    ENDLOOP.
+
+*    "--------------------------------------------------------
+*    " Fallback grouping: INPUT Deliveries WITHOUT Shipment
+*    "--------------------------------------------------------
+    LOOP AT it_delivery ASSIGNING FIELD-SYMBOL(<fs_deliv_fallback>).
+
+      IF line_exists( gt_group[ doc_typ = c_deliv
+                                doc_no  = <fs_deliv_fallback>-vbeln ] ).
+        CONTINUE.
+      ENDIF.
+
+      me->add_group_anchor(
+        is_key = VALUE ty_group_key(
+                   doc_typ = c_deliv
+                   doc_no  = <fs_deliv_fallback>-vbeln
+                 )
+      ).
+
+      me->append_bills_for_delivery(
+        iv_delivery_vbeln     = <fs_deliv_fallback>-vbeln
+        it_vbfa_invoice_valid = lt_vbfa_invoice_valid
+      ).
+
+    ENDLOOP.
+  ENDMETHOD.
+
+*
+*  "------------------------------------------------------------
+*  " Extraction for Shipment input
+*  "------------------------------------------------------------
+
+  METHOD extract_shipment.
+
+
+    TYPES: BEGIN OF ty_vbelv,
+             vbeln TYPE vbeln_von,
+           END OF ty_vbelv.
+    DATA: lt_deliveries         TYPE TABLE OF ty_vbelv,
+          lt_vbfa_invoice_valid TYPE ty_vbfa_link_tab.
+
+    CLEAR:  lt_deliveries, lt_vbfa_invoice_valid.
+
+    " 1. Fetch VBFA relations for deliveries
+    IF it_shipment IS NOT INITIAL.
+      SELECT vbelv, posnv,vbeln,posnn, vbtyp_n
+        FROM vbfa
+        INTO TABLE @DATA(lt_vbfa_all)
+        FOR ALL ENTRIES IN @it_shipment
+        WHERE vbeln = @it_shipment-tknum
+        AND vbtyp_n = @gc_8.
+    ENDIF.
+
+    LOOP AT lt_vbfa_all ASSIGNING FIELD-SYMBOL(<fs_vbfa>).
+      APPEND <fs_vbfa>-vbelv TO lt_deliveries.
+    ENDLOOP.
+    IF <fs_vbfa> IS ASSIGNED.
+      UNASSIGN <fs_vbfa>.
+    ENDIF.
+    SORT lt_deliveries BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM lt_deliveries COMPARING vbeln.
+
+    " 2. Validate deliveries in LIKP for VKORG
+    IF lt_deliveries IS NOT INITIAL.
+      SELECT vbeln,vkorg
+        FROM likp
+        INTO TABLE @DATA(lt_delivery)
+        FOR ALL ENTRIES IN @lt_deliveries
+        WHERE vbeln = @lt_deliveries-vbeln
+          AND vkorg = @p_vkorg.
+      IF sy-subrc = 0.
+        SORT lt_delivery BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_delivery COMPARING vbeln.
+      ENDIF.
+    ENDIF.
+    IF lt_delivery IS INITIAL.
+      MESSAGE i045(zs_mtc_sd) DISPLAY LIKE gc_e.
+      RETURN.
+    ENDIF.
+
+    " 3. GI check for deliveries
+    IF lt_delivery IS NOT INITIAL.
+      SELECT vbeln, wbstk
+        FROM vbuk
+        INTO TABLE @DATA(lt_vbuk)
+        FOR ALL ENTRIES IN @lt_delivery
+        WHERE vbeln = @lt_delivery-vbeln.
+
+      IF sy-subrc = 0.
+        SORT lt_vbuk BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_vbuk COMPARING vbeln.
+      ENDIF.
+    ENDIF.
+
+    LOOP AT lt_delivery ASSIGNING FIELD-SYMBOL(<fs_vbeln>).
+      READ TABLE lt_vbuk ASSIGNING FIELD-SYMBOL(<fs_vbuk>) WITH KEY vbeln = <fs_vbeln>-vbeln BINARY SEARCH.
+      IF <fs_vbuk> IS NOT ASSIGNED .
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_vbeln>-vbeln ) TO gt_gi_not_posted.
+      ELSEIF <fs_vbuk> IS ASSIGNED AND <fs_vbuk>-wbstk <> gc_c.
+        APPEND VALUE ty_vbeln_gi(  vbeln = <fs_vbeln>-vbeln ) TO gt_gi_not_posted.
+        UNASSIGN <fs_vbuk>.
+      ELSEIF <fs_vbuk> IS ASSIGNED AND <fs_vbuk>-wbstk = gc_c.
+        APPEND VALUE ty_vbeln_gi(  vbeln = <fs_vbeln>-vbeln ) TO gt_gi_posted.
+        UNASSIGN <fs_vbuk>.
+      ENDIF.
+    ENDLOOP.
+
+    IF <fs_vbeln> IS ASSIGNED.
+      UNASSIGN <fs_vbeln>.
+    ENDIF.
+
+    SORT gt_gi_posted BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM gt_gi_posted COMPARING vbeln.
+    SORT gt_gi_not_posted BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM gt_gi_not_posted COMPARING vbeln.
+
+
+    " 4. Fetch invoice headers for all invoice numbers
+
+    IF lt_delivery IS NOT INITIAL.
+
+      SELECT
+          a~vbelv,
+          a~posnv,
+          a~vbeln,
+          a~posnn,
+          a~vbtyp_n
+        FROM vbfa AS a
+        INNER JOIN vbrk AS b
+          ON b~vbeln = a~vbeln
+        INTO TABLE @lt_vbfa_invoice_valid
+        FOR ALL ENTRIES IN @lt_delivery
+        WHERE a~vbelv   = @lt_delivery-vbeln
+          AND a~vbtyp_n IN (@gc_m, @gc_u)
+          AND b~vkorg   = @p_vkorg
+          AND b~rfbsk  <> @gc_rfbsk_e.
+
+      IF sy-subrc = 0.
+        SORT lt_vbfa_invoice_valid BY vbeln vbtyp_n.
+        DELETE ADJACENT DUPLICATES FROM lt_vbfa_invoice_valid
+          COMPARING vbeln vbtyp_n.
+      ENDIF.
+
+    ENDIF.
+
+    """""""""""""""""""""for gi mapping""""""""""""""""""""""""
+
+    "────────────────────────────────────────────────────────────
+    " Map Invoice/Proforma -> Delivery from VBFA (Shipment driver)
+    "────────────────────────────────────────────────────────────
+
+    LOOP AT lt_vbfa_invoice_valid ASSIGNING FIELD-SYMBOL(<b3>)." WHERE vbtyp_n = gc_m OR vbtyp_n = gc_u.
+
+      CASE <b3>-vbtyp_n.
+        WHEN gc_m.
+          APPEND VALUE ty_inv_del_map( inv = <b3>-vbeln del = <b3>-vbelv ) TO gt_inv_to_del.
+        WHEN gc_u.
+          APPEND VALUE ty_inv_del_map( inv = <b3>-vbeln del = <b3>-vbelv ) TO gt_prf_to_del.
+        WHEN OTHERS.
+      ENDCASE.
+    ENDLOOP.
+
+    IF <b3> IS ASSIGNED.
+      UNASSIGN <b3>.
+    ENDIF.
+
+    SORT gt_inv_to_del BY inv del.
+    DELETE ADJACENT DUPLICATES FROM gt_inv_to_del COMPARING inv del.
+    SORT gt_prf_to_del BY inv del.
+    DELETE ADJACENT DUPLICATES FROM  gt_prf_to_del COMPARING inv del.
+
+    """"""""""grouping"""""""""""""
+
+    SORT lt_vbfa_all            BY vbeln.   " shipment -> delivery
+    SORT lt_vbfa_invoice_valid BY vbelv.   " delivery -> bill
+
+    LOOP AT it_shipment ASSIGNING FIELD-SYMBOL(<ls_shp>).   " Shipments (TKNUM)
+
+      me->add_group_anchor(
+        is_key = VALUE ty_group_key(
+                   doc_typ = c_ship
+                   doc_no  = <ls_shp>-tknum
+                 )
+      ).
+
+      me->append_ship_deliv_bills(
+        iv_tknum              = <ls_shp>-tknum
+        it_vbfa_linked        = lt_vbfa_all
+        it_vbfa_invoice_valid = lt_vbfa_invoice_valid
+      ).
+
+    ENDLOOP.
+
+
+  ENDMETHOD.
+
+  METHOD extract_invoice.
+
+
+    TYPES: BEGIN OF ty_vbeln_str,
+             vbeln TYPE vbeln_von,
+           END OF ty_vbeln_str.
+    DATA: lt_deliveries         TYPE TABLE OF ty_vbeln_str,
+          lt_linked_del         TYPE ty_vbeln_tab,
+          lt_delivery           TYPE ty_vbeln_tab,
+          lt_shipment           TYPE ty_tknum_tab,
+          lt_vbfa_invoice_valid TYPE ty_vbfa_link_tab,
+          lv_missing_shipment   TYPE string,
+          lt_missing_shipment   TYPE TABLE OF string.
+
+
+    CLEAR: lt_delivery, lt_shipment,lt_vbfa_invoice_valid.
+
+
+    " 2) VBFA: deliveries
+    IF it_invoice IS NOT INITIAL.
+      SELECT vbelv, posnv, vbeln, posnn, vbtyp_n,vbtyp_v
+        FROM vbfa
+        INTO TABLE @DATA(lt_vbfa_all)
+        FOR ALL ENTRIES IN @it_invoice
+        WHERE vbeln   = @it_invoice-vbeln
+        AND vbtyp_v = @gc_j.
+    ENDIF.
+
+
+    LOOP AT lt_vbfa_all ASSIGNING FIELD-SYMBOL(<fs_vbfa>) .
+      APPEND VALUE #( vbeln = <fs_vbfa>-vbelv ) TO lt_deliveries.
+    ENDLOOP.
+
+    SORT lt_deliveries BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM lt_deliveries COMPARING vbeln.
+
+    IF lt_deliveries IS INITIAL.
+      MESSAGE i045(zs_mtc_sd) DISPLAY LIKE gc_e .
+      RETURN.
+    ENDIF.
+
+    " 4) Validate deliveries in LIKP for VKORG
+    IF lt_deliveries IS NOT INITIAL.
+      SELECT vbeln
+        FROM likp
+        INTO TABLE @lt_delivery
+        FOR ALL ENTRIES IN @lt_deliveries
+        WHERE vbeln = @lt_deliveries-vbeln
+          AND vkorg = @p_vkorg.
+      IF sy-subrc = 0.
+        SORT lt_delivery BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_delivery COMPARING vbeln.
+      ENDIF.
+    ENDIF.
+
+
+
+    IF lt_delivery IS INITIAL.
+      MESSAGE i045(zs_mtc_sd) DISPLAY LIKE gc_e.
+      RETURN.
+    ENDIF.
+
+
+    " 5) GI check for deliveries (kept as-is)
+    IF lt_delivery IS NOT INITIAL.
+      SELECT vbeln, wbstk
+        FROM vbuk
+        INTO TABLE @DATA(lt_vbuk)
+        FOR ALL ENTRIES IN @lt_delivery
+        WHERE vbeln = @lt_delivery-vbeln.
+      IF sy-subrc = 0.
+        SORT lt_vbuk BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_vbuk COMPARING vbeln.
+      ENDIF.
+    ENDIF.
+
+    LOOP AT lt_delivery ASSIGNING FIELD-SYMBOL(<fs_dlv>).
+      READ TABLE lt_vbuk ASSIGNING FIELD-SYMBOL(<fs_vbuk>)
+           WITH KEY vbeln = <fs_dlv>-vbeln BINARY SEARCH.
+      IF  <fs_vbuk> IS NOT ASSIGNED.
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_dlv>-vbeln ) TO gt_gi_not_posted.
+      ELSEIF  <fs_vbuk> IS ASSIGNED AND <fs_vbuk>-wbstk <> gc_c.
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_dlv>-vbeln ) TO gt_gi_not_posted.
+        UNASSIGN <fs_vbuk>.
+      ELSEIF <fs_vbuk> IS ASSIGNED AND <fs_vbuk>-wbstk = gc_c.
+        APPEND VALUE ty_vbeln_gi( vbeln = <fs_dlv>-vbeln ) TO gt_gi_posted.
+        UNASSIGN <fs_vbuk>.
+      ENDIF.
+    ENDLOOP.
+
+    IF <fs_dlv> IS ASSIGNED.
+      UNASSIGN <fs_dlv>.
+    ENDIF.
+
+    SORT gt_gi_posted BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM gt_gi_posted COMPARING vbeln.
+    SORT gt_gi_not_posted BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM gt_gi_not_posted COMPARING vbeln.
+
+
+    " 6) Shipments linked to deliveries (VBFA-N = '8')
+    IF lt_delivery IS NOT INITIAL.
+      SELECT vbelv, posnv, vbeln, posnn, vbtyp_n
+        FROM vbfa
+        INTO TABLE @DATA(lt_ship_vbfa)
+        FOR ALL ENTRIES IN @lt_delivery
+        WHERE vbelv   = @lt_delivery-vbeln
+          AND vbtyp_n = @gc_8.
+      IF sy-subrc = 0.
+        SORT lt_ship_vbfa BY vbeln.
+      ENDIF.
+    ENDIF.
+
+    LOOP AT lt_ship_vbfa ASSIGNING FIELD-SYMBOL(<fs_shp_vbfa>).
+      APPEND VALUE ty_tknum( tknum = <fs_shp_vbfa>-vbeln ) TO lt_shipment.
+    ENDLOOP.
+
+    IF <fs_shp_vbfa> IS ASSIGNED.
+      UNASSIGN <fs_shp_vbfa>.
+    ENDIF.
+
+    SORT lt_shipment BY tknum.
+    DELETE ADJACENT DUPLICATES FROM lt_shipment COMPARING tknum.
+
+    " Validate shipments in VTTK for TPLST
+    IF lt_shipment IS NOT INITIAL.
+      SELECT tknum, tplst
+        FROM vttk
+        INTO TABLE @DATA(lt_vttk)
+        FOR ALL ENTRIES IN @lt_shipment
+        WHERE tknum = @lt_shipment-tknum
+          AND tplst = @p_tplst.
+      IF sy-subrc = 0.
+        SORT lt_vttk BY tknum.
+        DELETE ADJACENT DUPLICATES FROM lt_vttk COMPARING tknum.
+      ENDIF.
+    ENDIF.
+
+
+    LOOP AT lt_shipment ASSIGNING FIELD-SYMBOL(<fs_ship>).
+      READ TABLE lt_vttk TRANSPORTING NO FIELDS
+           WITH KEY tknum = <fs_ship>-tknum BINARY SEARCH.
+      IF sy-subrc <> 0.
+        APPEND |{ <fs_ship>-tknum ALPHA = OUT }| TO lt_missing_shipment.
+      ENDIF.
+    ENDLOOP.
+
+    IF <fs_ship> IS ASSIGNED.
+      UNASSIGN <fs_ship>.
+    ENDIF.
+
+    SORT lt_missing_shipment.
+    DELETE ADJACENT DUPLICATES FROM lt_missing_shipment.
+
+
+    CLEAR lv_missing_shipment.
+    CONCATENATE LINES OF lt_missing_shipment INTO lv_missing_shipment SEPARATED BY ', '.
+    IF lv_missing_shipment IS NOT INITIAL.
+      MESSAGE i039(zs_mtc_sd) WITH lv_missing_shipment.
+    ENDIF.
+
+    " 7) Linked deliveries for TKNUM -> merge into et_delivery (+GI kept)
+    IF lt_vttk IS NOT INITIAL.
+      SELECT vbelv, posnv, vbeln, posnn, vbtyp_n
+        FROM vbfa
+        INTO TABLE @DATA(lt_linked_vbfa)
+        FOR ALL ENTRIES IN @lt_vttk
+        WHERE vbeln   = @lt_vttk-tknum
+          AND vbtyp_n = @gc_8.
+
+      LOOP AT lt_linked_vbfa ASSIGNING FIELD-SYMBOL(<fs_linked>).
+        APPEND VALUE ty_vbeln( vbeln = <fs_linked>-vbelv ) TO lt_linked_del.
+      ENDLOOP.
+
+      IF <fs_linked> IS ASSIGNED.
+        UNASSIGN <fs_linked>.
+      ENDIF.
+
+      SORT lt_linked_del BY vbeln.
+      DELETE ADJACENT DUPLICATES FROM lt_linked_del COMPARING vbeln.
+
+      " Validate linked deliveries in LIKP for VKORG
+      IF lt_linked_del IS NOT INITIAL.
+        SELECT vbeln
+          FROM likp
+          APPENDING TABLE @lt_delivery
+          FOR ALL ENTRIES IN @lt_linked_del
+          WHERE vbeln = @lt_linked_del-vbeln
+            AND vkorg = @p_vkorg.
+
+        IF sy-subrc = 0.
+          SORT lt_delivery BY vbeln.
+          DELETE ADJACENT DUPLICATES FROM lt_delivery COMPARING vbeln.
+        ENDIF.
+      ENDIF.
+
+      " GI for linked deliveries
+
+      IF lt_delivery IS NOT INITIAL.
+        SELECT vbeln, wbstk
+          FROM vbuk
+          INTO TABLE @DATA(lt_linked_vbuk)
+          FOR ALL ENTRIES IN @lt_delivery
+          WHERE vbeln = @lt_delivery-vbeln.
+        IF sy-subrc = 0.
+          SORT lt_linked_vbuk BY vbeln.
+        ENDIF.
+
+        LOOP AT lt_delivery ASSIGNING FIELD-SYMBOL(<fs_linked_1>).
+          READ TABLE lt_linked_vbuk ASSIGNING FIELD-SYMBOL(<fs_linked_stat>)
+               WITH KEY vbeln = <fs_linked_1>-vbeln BINARY SEARCH.
+          IF <fs_linked_stat> IS NOT ASSIGNED.
+            APPEND VALUE ty_vbeln_gi( vbeln = <fs_linked_1>-vbeln ) TO gt_gi_not_posted.
+          ELSEIF <fs_linked_stat> IS ASSIGNED AND <fs_linked_stat>-wbstk <> gc_c.
+            APPEND VALUE ty_vbeln_gi( vbeln = <fs_linked_1>-vbeln ) TO gt_gi_not_posted.
+          ELSE.
+            APPEND VALUE ty_vbeln_gi( vbeln = <fs_linked_1>-vbeln ) TO gt_gi_posted.
+          ENDIF.
+        ENDLOOP.
+
+        SORT gt_gi_posted BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM gt_gi_posted COMPARING vbeln.
+        SORT gt_gi_not_posted BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM gt_gi_not_posted COMPARING vbeln.
+
+        IF <fs_linked_1> IS ASSIGNED.
+          UNASSIGN <fs_linked_1>.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+    IF lt_delivery IS NOT INITIAL.
+
+      SELECT
+          a~vbelv,
+          a~posnv,
+          a~vbeln,
+          a~posnn,
+          a~vbtyp_n
+        FROM vbfa AS a
+        INNER JOIN vbrk AS b
+          ON b~vbeln = a~vbeln
+        INTO TABLE @lt_vbfa_invoice_valid
+        FOR ALL ENTRIES IN @lt_delivery
+        WHERE a~vbelv   = @lt_delivery-vbeln
+          AND a~vbeln IN @s_vbbill     "++Added by Ragni 05Aug2026
+          AND a~vbtyp_n IN (@gc_m, @gc_u)
+          AND b~vkorg   = @p_vkorg
+          AND b~rfbsk  <> @gc_rfbsk_e.
+
+      IF sy-subrc = 0.
+        SORT lt_vbfa_invoice_valid BY vbeln vbtyp_n.
+        DELETE ADJACENT DUPLICATES FROM lt_vbfa_invoice_valid
+          COMPARING vbeln vbtyp_n.
+      ENDIF.
+    ENDIF.
+
+    """""""""""""""gi check"""""""""""""""""""""""
+
+    LOOP AT lt_vbfa_invoice_valid ASSIGNING FIELD-SYMBOL(<b4>). "WHERE vbtyp_n = gc_m OR vbtyp_n = gc_u.
+      CASE <b4>-vbtyp_n .
+        WHEN  gc_m.
+          APPEND VALUE ty_inv_del_map( inv = <b4>-vbeln del = <b4>-vbelv ) TO gt_inv_to_del.
+        WHEN gc_u.
+          APPEND VALUE ty_inv_del_map( inv = <b4>-vbeln del = <b4>-vbelv ) TO gt_prf_to_del.
+        WHEN OTHERS.
+      ENDCASE.
+
+    ENDLOOP.
+
+    SORT gt_inv_to_del BY inv del.
+    DELETE ADJACENT DUPLICATES FROM gt_inv_to_del COMPARING inv del.
+    SORT gt_prf_to_del BY inv del.
+    DELETE ADJACENT DUPLICATES FROM gt_prf_to_del COMPARING inv del.
+
+    """""""""""""""""""""""""""""""""gi check""""""""""""""""""""""""""""""""""""""""""""""
+
+    """"""""""""""""""""""""grouping""""""""""""""""""""""""""""
+
+    SORT lt_linked_vbfa        BY vbeln.   " shipment -> delivery
+    SORT lt_vbfa_invoice_valid BY vbelv.   " delivery -> bill
+
+    "--------------------------------------------------------
+    " 1) Shipment-based grouping (Invoice → Shipment path)
+    "--------------------------------------------------------
+    LOOP AT lt_vttk ASSIGNING FIELD-SYMBOL(<ls_vttk>).   " Shipments (TKNUM)
+
+      me->add_group_anchor(
+        is_key = VALUE ty_group_key(
+                   doc_typ = c_ship
+                   doc_no  = <ls_vttk>-tknum
+                 )
+      ).
+
+      me->append_ship_deliv_bills(
+        iv_tknum              = <ls_vttk>-tknum
+        it_vbfa_linked        = lt_linked_vbfa
+        it_vbfa_invoice_valid = lt_vbfa_invoice_valid
+      ).
+
+    ENDLOOP.
+
+    "--------------------------------------------------------
+    " 2) Fallback grouping: Deliveries WITHOUT Shipment
+    "--------------------------------------------------------
+    LOOP AT lt_delivery ASSIGNING FIELD-SYMBOL(<ls_deliv_fallback>).
+
+      " Already grouped via shipment
+      IF line_exists(
+           gt_group[
+             doc_typ = c_deliv
+             doc_no  = <ls_deliv_fallback>-vbeln
+           ]
+         ).
+        CONTINUE.
+      ENDIF.
+
+      me->add_group_anchor(
+        is_key = VALUE ty_group_key(
+                   doc_typ = c_deliv
+                   doc_no  = <ls_deliv_fallback>-vbeln
+                 )
+      ).
+
+      me->append_bills_for_delivery(
+        iv_delivery_vbeln     = <ls_deliv_fallback>-vbeln
+        it_vbfa_invoice_valid = lt_vbfa_invoice_valid
+      ).
+
+    ENDLOOP.
+  ENDMETHOD.
+
+*  "------------------------------------------------------------
+*  " Extraction for Accounting Documents
+*  "------------------------------------------------------------
+
+  METHOD extract_accounting.
+
+    DATA:lt_invoice  TYPE ty_vbfa_vbeln_tab.
+    CONSTANTS lc_awtyp TYPE awtyp VALUE 'VBRK'.
+
+
+    "------------------------------
+    " Accounting document input
+    "------------------------------
+
+    DATA(lv_gjahr_curr) = sy-datum+0(4).
+    DATA(lv_gjahr_prev) = lv_gjahr_curr - 1.
+
+    " 1. Get BUKRS from VKORG
+    SELECT SINGLE bukrs
+      FROM tvko
+      INTO @DATA(lv_bukrs)
+      WHERE vkorg = @p_vkorg.
+
+    " 2. Fetch BKPF entries for accounting docs
+    SELECT bukrs, belnr, gjahr, awtyp, awkey
+      FROM bkpf
+      INTO TABLE @DATA(lt_bkpf)
+      WHERE bukrs = @lv_bukrs
+       AND  belnr IN @s_belnr
+       AND ( gjahr = @lv_gjahr_curr OR gjahr = @lv_gjahr_prev )
+       AND awtyp = @lc_awtyp.
+    IF sy-subrc = 0.
+      SORT lt_bkpf BY gjahr.
+    ENDIF.
+
+    IF lt_bkpf IS INITIAL.
+      MESSAGE i043(zs_mtc_sd) DISPLAY LIKE gc_e. " Accounting document not found
+      RETURN.
+    ENDIF.
+
+    DATA(lt_bkpf_curr) = lt_bkpf.
+    DELETE lt_bkpf_curr WHERE gjahr <> lv_gjahr_curr.
+
+    DATA(lt_bkpf_prev) = lt_bkpf.
+    DELETE lt_bkpf_prev WHERE gjahr <> lv_gjahr_prev.
+
+    " 3. Build invoice list from AWKEY
+    IF lt_bkpf_curr IS NOT INITIAL.
+      LOOP AT lt_bkpf_curr ASSIGNING FIELD-SYMBOL(<fs_bkpf>).
+        APPEND VALUE ty_vbfa_vbeln( vbeln = <fs_bkpf>-awkey ) TO lt_invoice.
+      ENDLOOP.
+    ELSE.
+      LOOP AT lt_bkpf_prev ASSIGNING <fs_bkpf>.
+        APPEND VALUE ty_vbfa_vbeln( vbeln = <fs_bkpf>-awkey ) TO lt_invoice.
+      ENDLOOP.
+    ENDIF.
+
+
+    SORT lt_invoice BY vbeln.
+    DELETE ADJACENT DUPLICATES FROM lt_invoice COMPARING vbeln.
+
+    " 4. Validate invoices in VBRK for VKORG
+    IF lt_invoice IS NOT INITIAL.
+      SELECT vbeln,vkorg,rfbsk
+        FROM vbrk
+        INTO TABLE @DATA(lt_vbrk)
+        FOR ALL ENTRIES IN @lt_invoice
+        WHERE vbeln = @lt_invoice-vbeln
+          AND vkorg = @p_vkorg
+        AND   rfbsk NE @gc_rfbsk_e.
+    ENDIF.
+
+    IF lt_vbrk IS INITIAL.
+      MESSAGE i047(zs_mtc_sd) DISPLAY LIKE gc_e. " Sales invoice not found
+      RETURN.
+    ENDIF.
+
+    " 5. Continue with invoice extraction logic
+    extract_invoice(
+      EXPORTING it_invoice   = lt_vbrk  ).   " Sales Invoice
+
+
+  ENDMETHOD.
+
+
+  "------------------------------------------------------------
+  " Method: fetch_documents
+
+  "------------------------------------------------------------
+
+  METHOD fetch_documents.
+
+    DATA: lt_so           TYPE ty_vbeln_tab,
+          lt_tmp_delivery TYPE ty_vbeln_tab,
+          lt_tmp_shipment TYPE ty_tknum_tab,
+          lt_tmp_invoice  TYPE ty_vbfa_tab_1,
+          lt_tmp_proforma TYPE ty_vbfa_tab_1,
+          lr_lfart        TYPE TABLE OF lfart_range.
+    CONSTANTS: lc_v2 TYPE b012-kappl VALUE 'V2'.
+
+    "------------------------------
+    " 1) Sales Order input
+    "------------------------------
+    IF s_vbeln[] IS NOT INITIAL.
+
+
+      CLEAR lt_so.
+      SELECT vbeln
+        FROM vbak
+        INTO TABLE @lt_so
+        WHERE vbeln IN @s_vbeln
+          AND vkorg  = @p_vkorg.
+
+      IF lt_so IS INITIAL.
+        MESSAGE i037(zs_mtc_sd) DISPLAY LIKE gc_e. " Sales order not found
+
+      ELSE.
+        CLEAR: lt_tmp_delivery, lt_tmp_shipment, lt_tmp_invoice, lt_tmp_proforma.
+        extract_from_so_input(
+          EXPORTING it_so     = lt_so ).
+
+      ENDIF.
+    ENDIF.
+
+    "------------------------------
+    " 2) Customer PO input
+    "------------------------------
+    IF s_bstnk[] IS NOT INITIAL.
+      CLEAR lt_so.
+      SELECT vbeln
+        FROM vbak
+        INTO TABLE @lt_so
+        WHERE bstnk IN @s_bstnk
+          AND vkorg  = @p_vkorg.
+
+      IF lt_so IS INITIAL.
+*        MESSAGE e044(zs_mtc_sd). " Customer PO not found
+        MESSAGE i044(zs_mtc_sd) DISPLAY LIKE gc_e. " Customer PO not found
+      ELSE.
+        CLEAR: lt_tmp_delivery, lt_tmp_shipment, lt_tmp_invoice, lt_tmp_proforma.
+        extract_from_so_input(
+          EXPORTING it_so     = lt_so ).
+      ENDIF.
+    ENDIF.
+
+    "------------------------------
+    " 3) Delivery input
+    "------------------------------
+    IF s_vbldel[] IS NOT INITIAL.
+      CLEAR lt_tmp_delivery.
+      SELECT vbeln
+        FROM likp
+        INTO TABLE @lt_tmp_delivery
+        WHERE vbeln IN @s_vbldel
+          AND vkorg  = @p_vkorg.
+      IF sy-subrc = 0.
+        SORT lt_tmp_delivery BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM lt_tmp_delivery COMPARING vbeln.
+      ENDIF.
+
+      IF lt_tmp_delivery IS INITIAL.
+*        MESSAGE e045(zs_mtc_sd). " Delivery not found
+        MESSAGE i045(zs_mtc_sd) DISPLAY LIKE gc_e. " Delivery not found
+      ELSE.
+        CLEAR: lt_tmp_shipment, lt_tmp_invoice, lt_tmp_proforma.
+        extract_delivery(
+          EXPORTING it_delivery = lt_tmp_delivery ).
+      ENDIF.
+    ENDIF.
+
+    "------------------------------
+    " 4) Shipment input
+    "------------------------------
+    IF s_tknum[] IS NOT INITIAL.
+      CLEAR lt_tmp_shipment.
+      SELECT tknum
+        FROM vttk
+        INTO TABLE @lt_tmp_shipment
+        WHERE tknum IN @s_tknum
+          AND tplst  = @p_tplst.
+
+      IF lt_tmp_shipment IS INITIAL.
+*        MESSAGE e046(zs_mtc_sd). " Shipment not found
+        MESSAGE i046(zs_mtc_sd) DISPLAY LIKE gc_e. " Shipment not found
+      ELSE.
+        CLEAR: lt_tmp_delivery, lt_tmp_invoice, lt_tmp_proforma.
+        extract_shipment(
+          EXPORTING it_shipment = lt_tmp_shipment ).
+      ENDIF.
+    ENDIF.
+
+    "------------------------------
+    " 5) Billing input (Sales invoice)
+    "------------------------------
+    IF s_vbbill[] IS NOT INITIAL.
+      CLEAR lt_tmp_invoice.
+      SELECT vbeln,vkorg,rfbsk
+        FROM vbrk
+        INTO TABLE @lt_tmp_invoice
+        WHERE vbeln IN @s_vbbill
+          AND vkorg  = @p_vkorg
+        AND   rfbsk NE @gc_rfbsk_e.
+
+      IF lt_tmp_invoice IS INITIAL.
+*        MESSAGE e047(zs_mtc_sd). " Sales invoice not found
+        MESSAGE i047(zs_mtc_sd) DISPLAY LIKE gc_e. " Sales invoice not found
+
+      ELSE.
+        CLEAR: lt_tmp_delivery, lt_tmp_shipment, lt_tmp_proforma.
+        extract_invoice(
+          EXPORTING it_invoice = lt_tmp_invoice ).
+
+      ENDIF.
+    ENDIF.
+
+    "------------------------------
+    " 6) Proforma input
+    "------------------------------
+    IF s_vbprof[] IS NOT INITIAL.
+      CLEAR lt_tmp_proforma.
+      SELECT vbeln,vkorg,rfbsk
+        FROM vbrk
+        INTO TABLE @lt_tmp_proforma
+        WHERE vbeln IN @s_vbprof
+          AND vkorg  = @p_vkorg
+          AND   rfbsk NE @gc_rfbsk_e.
+
+      IF lt_tmp_proforma IS INITIAL.
+*        MESSAGE e048(zs_mtc_sd). " Proforma not found
+        MESSAGE i048(zs_mtc_sd) DISPLAY LIKE gc_e. " Proforma not found
+      ELSE.
+        CLEAR: lt_tmp_delivery, lt_tmp_shipment, lt_tmp_invoice.
+        extract_invoice(
+          EXPORTING it_invoice = lt_tmp_proforma ).
+      ENDIF.
+    ENDIF.
+
+    "------------------------------
+    " 7) Accounting document input
+    "------------------------------
+    IF s_belnr[] IS NOT INITIAL.
+      CLEAR: lt_tmp_delivery, lt_tmp_shipment, lt_tmp_invoice, lt_tmp_proforma.
+      extract_accounting( ).
+    ENDIF.
+
+    IF gt_group IS NOT INITIAL.
+
+      LOOP AT gt_group ASSIGNING FIELD-SYMBOL(<g>) WHERE doc_typ = c_deliv.
+        APPEND VALUE ty_vbeln( vbeln = CONV likp-vbeln( <g>-doc_no ) ) TO gt_view_delivery.
+      ENDLOOP.
+      IF <g> IS ASSIGNED.
+        SORT gt_view_delivery BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM gt_view_delivery COMPARING vbeln.
+        UNASSIGN <g>.
+      ENDIF.
+
+      LOOP AT gt_group ASSIGNING <g> WHERE doc_typ = c_ship.
+        APPEND VALUE ty_tknum( tknum = CONV vttk-tknum( <g>-doc_no ) ) TO gt_view_shipment.
+      ENDLOOP.
+
+      IF <g> IS ASSIGNED.
+        SORT gt_view_shipment BY tknum.
+        DELETE ADJACENT DUPLICATES FROM gt_view_shipment COMPARING tknum.
+        UNASSIGN <g>.
+      ENDIF.
+
+      LOOP AT gt_group ASSIGNING <g> WHERE doc_typ = c_sinv.
+        APPEND VALUE ty_vbfa_vbeln( vbeln = CONV vbrk-vbeln( <g>-doc_no ) ) TO gt_view_invoice.
+      ENDLOOP.
+
+      IF <g> IS ASSIGNED.
+        SORT gt_view_invoice BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM gt_view_invoice COMPARING vbeln.
+        UNASSIGN <g>.
+      ENDIF.
+      LOOP AT gt_group ASSIGNING <g> WHERE doc_typ = c_pro.
+        APPEND VALUE ty_vbfa_vbeln( vbeln = CONV vbrk-vbeln( <g>-doc_no ) ) TO gt_view_proforma.
+      ENDLOOP.
+      IF <g> IS ASSIGNED.
+        SORT gt_view_proforma BY vbeln.
+        DELETE ADJACENT DUPLICATES FROM gt_view_proforma COMPARING vbeln.
+        UNASSIGN <g>.
+      ENDIF.
+    ENDIF.
+
+*BOI by Ragni Chandrawanshi on 26Mar
+    IF cb_pklst EQ abap_true.
+      SELECT vbeln, lfart
+          FROM likp
+          INTO TABLE @gt_likp_final
+        FOR ALL ENTRIES IN @gt_view_delivery
+        WHERE vbeln EQ @gt_view_delivery-vbeln.
+      IF sy-subrc IS INITIAL.
+        SORT gt_likp_final BY vbeln.
+        LOOP AT gt_likp_final INTO DATA(lw_likp_final).
+          APPEND VALUE #( sign = gc_i option = gc_eq low = lw_likp_final-lfart )
+           TO lr_lfart[].
+        ENDLOOP.
+        SORT lr_lfart BY low.
+        DELETE ADJACENT DUPLICATES FROM lr_lfart COMPARING low.
+        IF lr_lfart[] IS NOT INITIAL AND
+          gv_pack_outtyp IS NOT INITIAL.
+          SELECT kschl, lfart
+                 FROM b012
+            INTO TABLE @gt_b012
+            WHERE kappl EQ @lc_v2
+            AND kschl EQ @gv_pack_outtyp
+            AND lfart IN @lr_lfart.
+          IF sy-subrc IS INITIAL.
+            SORT gt_b012 BY lfart.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+*EOI by Ragni Chandrawanshi on 26Mar
+  ENDMETHOD.
+
+  METHOD add_group_anchor.
+
+    IF line_exists( gt_group[ doc_no = is_key-doc_no ] ).
+      RETURN.
+    ENDIF.
+
+    gv_group = gv_group + 1.
+
+    APPEND VALUE ty_group(
+             doc_typ = is_key-doc_typ
+             doc_no  = is_key-doc_no
+             group   = gv_group
+           ) TO gt_group.
+
+  ENDMETHOD.
+
+  METHOD append_ship_deliv_bills.
+
+    READ TABLE it_vbfa_linked ASSIGNING FIELD-SYMBOL(<fs_deliv>)
+         WITH KEY vbeln = iv_tknum
+         BINARY SEARCH.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_deliv_idx) = sy-tabix.
+
+    LOOP AT it_vbfa_linked ASSIGNING <fs_deliv> FROM lv_deliv_idx.
+
+      IF <fs_deliv>-vbeln <> iv_tknum.
+        EXIT.
+      ENDIF.
+
+      IF line_exists( gt_group[ doc_no = <fs_deliv>-vbelv ] ).
+        CONTINUE.
+      ENDIF.
+
+      APPEND VALUE ty_group(
+        doc_typ = c_deliv
+        doc_no  = <fs_deliv>-vbelv
+        group   = gv_group
+      ) TO gt_group.
+
+
+      READ TABLE it_vbfa_invoice_valid ASSIGNING FIELD-SYMBOL(<fs_bill>)
+           WITH KEY vbelv = <fs_deliv>-vbelv
+           BINARY SEARCH.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+
+      DATA(lv_bill_idx) = sy-tabix.
+
+      LOOP AT it_vbfa_invoice_valid ASSIGNING <fs_bill> FROM lv_bill_idx.
+
+        IF <fs_bill>-vbelv <> <fs_deliv>-vbelv.
+          EXIT.
+        ENDIF.
+
+        IF <fs_bill>-vbtyp_n <> gc_m AND <fs_bill>-vbtyp_n <> gc_u.
+          CONTINUE.
+        ENDIF.
+
+        IF line_exists( gt_group[ doc_no = <fs_bill>-vbeln ] ).
+          CONTINUE.
+        ENDIF.
+
+        CASE <fs_bill>-vbtyp_n.
+          WHEN gc_m.
+            APPEND VALUE ty_group(
+              doc_typ = c_sinv
+              doc_no  = <fs_bill>-vbeln
+              group   = gv_group
+            ) TO gt_group.
+          WHEN gc_u.
+            APPEND VALUE ty_group(
+              doc_typ = c_pro
+              doc_no  = <fs_bill>-vbeln
+              group   = gv_group
+            ) TO gt_group.
+        ENDCASE.
+
+      ENDLOOP.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+  METHOD append_bills_for_delivery.
+
+
+
+    READ TABLE it_vbfa_invoice_valid ASSIGNING FIELD-SYMBOL(<fs_bill_fallback>)
+         WITH KEY vbelv = iv_delivery_vbeln
+         BINARY SEARCH.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_bill_idx) = sy-tabix.
+
+    LOOP AT it_vbfa_invoice_valid ASSIGNING <fs_bill_fallback> FROM lv_bill_idx.
+
+      IF <fs_bill_fallback>-vbelv <> iv_delivery_vbeln.
+        EXIT.
+      ENDIF.
+
+      IF <fs_bill_fallback>-vbtyp_n <> gc_m AND <fs_bill_fallback>-vbtyp_n <> gc_u.
+        CONTINUE.
+      ENDIF.
+
+      IF line_exists( gt_group[ doc_no = <fs_bill_fallback>-vbeln ] ).
+        CONTINUE.
+      ENDIF.
+
+      CASE <fs_bill_fallback>-vbtyp_n.
+        WHEN gc_m.
+          APPEND VALUE ty_group(
+            doc_typ = c_sinv
+            doc_no  = <fs_bill_fallback>-vbeln
+            group   = gv_group
+          ) TO gt_group.
+
+        WHEN gc_u.
+          APPEND VALUE ty_group(
+            doc_typ = c_pro
+            doc_no  = <fs_bill_fallback>-vbeln
+            group   = gv_group
+          ) TO gt_group.
+      ENDCASE.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD preload_mkpf_for_deliveries.
+    TYPES: BEGIN OF ty_xblnr,
+             xblnr TYPE xblnr1,
+           END OF ty_xblnr.
+    DATA: lt_vbfa  TYPE STANDARD TABLE OF vbfavb,
+          lt_vbfa2 TYPE STANDARD TABLE OF vbfavb,
+          lv_vbeln TYPE vbeln.
+    DATA: lt_xblnr_keys TYPE TABLE OF ty_xblnr.
+    CLEAR gt_mkpf_by_xblnr.
+
+    IF it_delivery IS INITIAL.
+      RETURN.
+    ENDIF.
+
+
+    lt_xblnr_keys = VALUE #( FOR d IN it_delivery ( |{ d-vbeln ALPHA = IN }| ) ).
+    SORT lt_xblnr_keys.
+    DELETE ADJACENT DUPLICATES FROM lt_xblnr_keys.
+
+
+    FREE: lt_vbfa.
+    LOOP AT lt_xblnr_keys INTO DATA(wa_keys).
+
+      FREE lt_vbfa2.
+      lv_vbeln = wa_keys-xblnr.
+      CALL FUNCTION 'SD_VBFA_READ_WITH_VBELV'
+        EXPORTING
+          i_vbelv          = lv_vbeln
+        TABLES
+          et_vbfavb        = lt_vbfa2
+        EXCEPTIONS
+          record_not_found = 1
+          OTHERS           = 2.
+      IF sy-subrc EQ 0.
+        APPEND LINES OF lt_vbfa2 TO lt_vbfa.
+      ENDIF.
+    ENDLOOP.
+
+    DELETE lt_vbfa WHERE vbtyp_n NE 'h'. "returns
+    IF lt_vbfa[] IS NOT INITIAL.
+      SELECT mblnr,
+             smbln
+             FROM mseg
+            FOR ALL ENTRIES IN @lt_vbfa
+            WHERE mblnr EQ @lt_vbfa-vbeln
+              AND mjahr EQ @lt_vbfa-mjahr
+              INTO TABLE @DATA(lt_mseg_ret).
+    ENDIF.
+
+    SELECT  mblnr, mjahr,xblnr
+      FROM  mkpf
+      INTO  TABLE @gt_mkpf_by_xblnr
+      FOR ALL ENTRIES IN @lt_xblnr_keys
+      WHERE xblnr = @lt_xblnr_keys-xblnr.
+    IF sy-subrc = 0.
+      DATA(lt_xb2) = gt_mkpf_by_xblnr[].
+      FREE gt_mkpf_by_xblnr.
+      LOOP AT lt_xb2 INTO DATA(wa_xblnr).
+        IF NOT line_exists( lt_mseg_ret[ smbln = wa_xblnr-mblnr ] )
+         AND NOT line_exists( lt_mseg_ret[ mblnr = wa_xblnr-mblnr ] ).
+          APPEND wa_xblnr TO gt_mkpf_by_xblnr.
+        ENDIF.
+      ENDLOOP.
+
+      SORT gt_mkpf_by_xblnr BY xblnr.
+      DELETE ADJACENT DUPLICATES FROM gt_mkpf_by_xblnr COMPARING xblnr.
+    ELSE.
+      RETURN.
+    ENDIF.
+  ENDMETHOD.
+
+
+
+  "===========================================================
+  " Preload BKPF cache once (FOR ALL ENTRIES) for billing names
+  "===========================================================
+
+  METHOD preload_bkpf_for_billings.
+    CLEAR gt_bkpf_by_awkey.
+    IF it_billing IS INITIAL.
+      RETURN.
+    ENDIF.
+    TYPES: BEGIN OF ty_awkey,
+             awkey TYPE awkey,
+           END OF ty_awkey.
+
+    DATA: lt_awkey_keys TYPE TABLE OF ty_awkey.
+    CONSTANTS lc_awtyp TYPE awtyp VALUE 'VBRK'.
+
+
+    lt_awkey_keys = VALUE #( FOR b IN it_billing ( |{ b-vbeln ALPHA = IN }| ) ).
+    SORT lt_awkey_keys.
+    DELETE ADJACENT DUPLICATES FROM lt_awkey_keys.
+
+    SELECT bukrs, belnr, gjahr , awkey
+      FROM bkpf
+      INTO  TABLE @gt_bkpf_by_awkey
+      FOR ALL ENTRIES IN @lt_awkey_keys
+      WHERE awtyp = @lc_awtyp
+        AND awkey = @lt_awkey_keys-awkey.
+    IF sy-subrc = 0.
+      SORT gt_bkpf_by_awkey BY awkey.
+      DELETE ADJACENT DUPLICATES FROM gt_bkpf_by_awkey COMPARING awkey.
+    ELSE.
+      RETURN.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD get_billto_name.
+    CLEAR rv_name.
+
+    SELECT SINGLE vbeln, kunrg
+      FROM vbrk
+      INTO @DATA(ls_kunrg)
+      WHERE vbeln = @iv_vbrk.
+
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+
+    DATA(lv_kunrg) = ls_kunrg-kunrg.
+    SELECT SINGLE kunnr, name1
+      FROM kna1
+      INTO @DATA(ls_name1)
+      WHERE kunnr = @lv_kunrg.
+    IF sy-subrc = 0 .
+      DATA(lv_name1) = ls_name1-name1.
+    ENDIF.
+    IF lv_name1 IS NOT INITIAL.
+      rv_name = lv_name1.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD build_filename.
+    DATA: lv_name  TYPE string,
+          lv_vbeln TYPE likp-vbeln,
+          lv_mblnr TYPE mkpf-mblnr,
+          lv_vbrk  TYPE vbrk-vbeln,
+          lv_belnr TYPE bkpf-belnr,
+          lv_tknum TYPE vttk-tknum.
+
+    CONSTANTS lc_pdf TYPE string VALUE '.pdf'.
+
+    CASE iv_doc_category.
+
+      WHEN gc_cat_dlvn.
+        lv_vbeln = CONV mkpf-xblnr( iv_docnum ).
+        IF rb_dlvn1 = abap_true.   " Delivery number
+          lv_name = |{ text-017 }_{ lv_vbeln ALPHA = OUT }|. " text-017 - Delivery note
+        ELSE.                      " Delivery note number via MKPF-MBLNR
+          READ TABLE gt_mkpf_by_xblnr INTO DATA(ls_mkpf)
+               WITH KEY xblnr = lv_vbeln.
+          IF sy-subrc = 0 AND ls_mkpf-mblnr IS NOT INITIAL.
+            lv_mblnr = ls_mkpf-mblnr.
+            lv_name  = |{ text-017 }_{ lv_mblnr ALPHA = OUT }|. " text-017 - Delivery note
+          ELSE.
+            lv_name = |{ text-017 }_{ lv_vbeln ALPHA = OUT }|. " text-017 - Delivery note
+          ENDIF.
+        ENDIF.
+
+      WHEN gc_cat_pklst.
+        lv_vbeln = CONV mkpf-xblnr( iv_docnum ).
+        IF rb_pkls1 = abap_true.   " Delivery number
+          lv_name = |{ text-018 }_{ lv_vbeln ALPHA = OUT }|. "" text-018 - Packaging list
+        ELSE.                      " Delivery note number via MKPF-MBLNR
+          READ TABLE gt_mkpf_by_xblnr INTO DATA(ls_mkpf2)
+               WITH KEY xblnr = lv_vbeln.
+          IF sy-subrc = 0 AND ls_mkpf2-mblnr IS NOT INITIAL.
+            lv_mblnr = ls_mkpf2-mblnr.
+            lv_name  = |{ text-018 }_{ lv_mblnr ALPHA = OUT }|. "" text-018 - Packaging list
+          ELSE.
+            lv_name  = |{ text-018 }_{ lv_vbeln ALPHA = OUT }|. "" text-018 - Packaging list
+          ENDIF.
+        ENDIF.
+        """""""""""cmr is not defined yet""""""""""""""""
+        """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+      WHEN gc_cat_sinv.
+
+        lv_vbrk = CONV bkpf-awkey( iv_docnum ).
+        READ TABLE gt_bkpf_by_awkey INTO DATA(ls_bkpf)
+             WITH KEY awkey = lv_vbrk.
+        IF sy-subrc = 0.
+          lv_belnr = ls_bkpf-belnr.
+        ENDIF.
+
+        IF rb_sinv4 = abap_true.
+          DATA(lv_billto) = me->get_billto_name( iv_vbrk = lv_vbrk ).
+
+          " Fallbacks: keep name and trailing token non-empty
+          IF lv_billto IS INITIAL.
+            lv_billto = |{ lv_vbrk ALPHA = OUT }|.
+          ENDIF.
+          IF lv_belnr IS INITIAL.
+            lv_belnr = lv_vbrk.
+          ENDIF.
+
+          lv_name = |{ lv_billto }_{ lv_belnr ALPHA = OUT }|.
+
+        ELSEIF cb_sivnp = abap_true.           " without prefix
+          lv_name = COND string(
+                      WHEN lv_belnr IS NOT INITIAL THEN |{ lv_belnr ALPHA = OUT }|
+                      ELSE |{ lv_vbrk  ALPHA = OUT }| ).
+        ELSEIF rb_sinv1 = abap_true.       " Billing document
+          lv_name = |{ text-019 }_{ lv_vbrk ALPHA = OUT }|.     " text-019 - Billing document
+        ELSE.                               " Accounting document (default)
+          lv_name = COND string(
+                      WHEN lv_belnr IS NOT INITIAL
+                        THEN |{ text-020 }_{ lv_belnr ALPHA = OUT }| " text-020 - Accounting document
+                        ELSE |{ text-019 }_{ lv_vbrk  ALPHA = OUT }| ).
+        ENDIF.
+
+      WHEN gc_cat_prfin.
+        lv_vbrk = CONV vbrk-vbeln( iv_docnum ).
+        IF cb_sivnp = abap_true.
+          lv_name = |{ lv_vbrk ALPHA = OUT }|.
+        ELSE.
+          lv_name = |{ text-021 }_{ lv_vbrk ALPHA = OUT }|.  " text-021 - Proforma invoice
+        ENDIF.
+
+      WHEN gc_cat_cmr.
+        lv_tknum = CONV vttk-tknum( iv_docnum ).
+        lv_name  = |{ text-025 }_{ lv_tknum ALPHA = OUT }|. " text-025 - CMR
+
+      WHEN gc_cat_shprq.
+        lv_tknum = CONV vttk-tknum( iv_docnum ).
+        lv_name  = |{ text-022 }_{ lv_tknum ALPHA = OUT }|. " text-022 - Shipment request
+
+      WHEN gc_cat_ldlst.
+        lv_tknum = CONV vttk-tknum( iv_docnum ).
+        lv_name  = |{ text-023 }_{ lv_tknum ALPHA = OUT }|.  " text-023 - Loading list
+
+      WHEN OTHERS.
+        lv_name = |{ iv_doc_category }_{ iv_docnum }|.
+    ENDCASE.
+
+    rv_name = |{ lv_name }{ lc_pdf }|.
+    CONDENSE rv_name.
+  ENDMETHOD.
+
+  METHOD is_gi_required.
+    " Shipment Request & Loading List do NOT require GI.
+    rv_yes = xsdbool(
+               iv_cat = gc_cat_dlvn OR
+               iv_cat = gc_cat_pklst OR
+               iv_cat = gc_cat_cmr  OR
+               iv_cat = gc_cat_sinv OR
+               iv_cat = gc_cat_prfin ).
+  ENDMETHOD.
+
+  METHOD gi_block_if_needed.
+    rv_block = abap_false.
+    CHECK is_gi_required( iv_cat ) = abap_true.
+
+
+    CASE iv_cat.
+      WHEN gc_cat_dlvn OR gc_cat_pklst .
+        " iv_id = Delivery number
+        DATA(lv_del) = CONV likp-vbeln( iv_id ).
+**BOI by Ragni Chandrawanshi on 26Mar
+        IF iv_cat EQ gc_cat_pklst.
+          READ TABLE gt_likp_final INTO DATA(lw_likp_final)
+          WITH KEY vbeln = lv_del BINARY SEARCH.
+          IF sy-subrc IS INITIAL.
+            READ TABLE gt_b012 TRANSPORTING NO FIELDS
+            WITH KEY lfart = lw_likp_final-lfart BINARY SEARCH.
+            IF sy-subrc <> 0.
+              rv_block = abap_true.
+              RETURN.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+*EOI by Ragni Chandrawanshi on 26Mar
+        READ TABLE gt_gi_posted WITH KEY vbeln = lv_del TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          rv_block = abap_true.
+          RETURN.
+        ENDIF.
+
+        " Sales invoice
+      WHEN gc_cat_sinv.
+        DATA(lv_inv) = CONV vbrk-vbeln( iv_id ).
+        DATA(lv_any_linked) = abap_false.
+        LOOP AT gt_inv_to_del ASSIGNING FIELD-SYMBOL(<m>) WHERE inv = lv_inv.
+          lv_any_linked = abap_true.
+          READ TABLE gt_gi_posted WITH KEY vbeln = <m>-del TRANSPORTING NO FIELDS.
+          IF sy-subrc <> 0.
+            rv_block = abap_true.
+            EXIT.
+          ENDIF.
+        ENDLOOP.
+
+        IF lv_any_linked = abap_false.
+          rv_block = abap_true.
+          RETURN.
+        ENDIF.
+
+        " Proforma
+      WHEN gc_cat_prfin.
+        DATA(lv_prf) = CONV vbrk-vbeln( iv_id ).
+        DATA(lv_any_linked2) = abap_false.
+        LOOP AT gt_prf_to_del ASSIGNING FIELD-SYMBOL(<p>) WHERE inv = lv_prf.
+          lv_any_linked2 = abap_true.
+          READ TABLE gt_gi_posted WITH KEY vbeln = <p>-del TRANSPORTING NO FIELDS.
+          IF sy-subrc <> 0.
+            rv_block = abap_true.
+            EXIT.
+          ENDIF.
+        ENDLOOP.
+
+        IF lv_any_linked2 = abap_false.
+          rv_block = abap_true.
+          RETURN.
+        ENDIF.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD build_fullpath.
+    DATA lv_sep TYPE c LENGTH 1.
+    cl_gui_frontend_services=>get_file_separator(
+      CHANGING file_separator = lv_sep ).
+    DATA(lv_dir) = iv_dir.
+
+    " prevent double separators
+    WHILE lv_dir IS NOT INITIAL.
+      DATA(lv_len) = strlen( lv_dir ).
+      IF lv_len = 0.
+        EXIT.
+      ENDIF.
+
+      DATA(lv_off) = lv_len - 1.
+
+      " Check the last character; trim if it equals the separator
+      IF substring( val = lv_dir off = lv_off len = 1 ) = lv_sep.
+        lv_dir = lv_dir+0(lv_off).
+      ELSE.
+        EXIT.
+      ENDIF.
+    ENDWHILE.
+
+
+    rv_full = |{ lv_dir }{ lv_sep }{ iv_name }|.
+
+  ENDMETHOD.
+
+
+  METHOD try_generate_pdf_tline.
+
+
+    CLEAR: et_solix, ev_size, ev_msg.
+    rv_ok = abap_false.
+
+    DATA:lv_rcode TYPE sy-subrc,
+         ls_map   TYPE ty_doc_output_type,
+         ls_nast  TYPE nast.
+
+    CONSTANTS: lc_1     TYPE na_nacha VALUE '1',
+               lc_4     TYPE na_vsztp VALUE '4',
+               lc_local TYPE rspopname VALUE 'ZMTC'.
+
+    CLEAR ls_map.
+
+    READ TABLE gt_doc_output_types INTO ls_map WITH KEY doc_key = iv_key BINARY SEARCH.
+
+    IF sy-subrc <> 0 OR ls_map-output_type IS INITIAL.
+      RETURN.
+    ENDIF.
+
+
+    IF me->gi_block_if_needed(
+         iv_cat = iv_doc_category
+         iv_id  = iv_docnum
+         iv_key = iv_key ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    CLEAR ls_nast.
+    ls_nast-kschl = ls_map-output_type.
+    ls_nast-kappl = ls_map-ka.
+    ls_nast-nacha = lc_1.       "Print output
+    ls_nast-vsztp = lc_4. " Send immediately (when saving the application)
+    ls_nast-ldest = lc_local.
+    ls_nast-erdat = sy-datum.
+    ls_nast-eruhr = sy-uzeit.
+    ls_nast-dsnam = 'ZLNDOC'.
+    ls_nast-dsuf1 = ls_nast-kschl.
+    ls_nast-dsuf2 = |{ sy-datum+2(2) }{ sy-datum+4(4) }{ ls_nast-eruhr }|.
+
+
+    CASE iv_doc_category.
+      WHEN gc_cat_dlvn OR gc_cat_pklst.
+        ls_nast-objky = |{ CONV likp-vbeln( iv_docnum ) ALPHA = IN }|.
+
+      WHEN gc_cat_sinv OR gc_cat_prfin.
+        ls_nast-objky = |{ CONV vbrk-vbeln( iv_docnum ) ALPHA = IN }|.
+
+      WHEN gc_cat_shprq OR gc_cat_ldlst OR gc_cat_cmr.
+        ls_nast-objky = |{ CONV vttk-tknum( iv_docnum ) ALPHA = IN }|.
+
+      WHEN OTHERS.
+        ls_nast-objky = iv_docnum.
+    ENDCASE.
+
+    """"""""""""
+* BOC by Ragni on 03Aug2026
+*    DATA(lv_datum) =  |{ sy-datum(4) }%|.
+*    IF gv_spoolid IS INITIAL.
+*      SELECT rqident,rqclient, rqowner, rqfinal,rqcretime
+*          FROM tsp01
+*          INTO TABLE @DATA(lt_tsp01)
+*          WHERE rqowner = @sy-uname
+*          AND  rqclient = @sy-mandt
+*          AND ( rqfinal = @gc_c
+*             OR rqfinal = @gc_dot ) "++Added by Ragni on 30Jul2026
+*        AND rqcretime LIKE @lv_datum  .
+*      IF sy-subrc = 0.
+**        SORT lt_tsp01 BY rqowner rqcretime DESCENDING.
+*        SORT lt_tsp01 BY rqcretime DESCENDING.
+**        DELETE ADJACENT DUPLICATES FROM lt_tsp01 COMPARING rqowner.
+*        gv_spoolid_1 = lt_tsp01[ 1 ]-rqident.  " newest first
+*
+*      ENDIF.
+*    ELSE.
+*      lv_datum = |{ sy-datum }%|.
+*      SELECT rqident,rqclient, rqowner, rqfinal,rqcretime
+*      FROM tsp01
+*      INTO TABLE @lt_tsp01
+*      "WHERE rqident > @gv_spoolid_1
+*        WHERE ( rqfinal = @gc_c
+*         OR rqfinal = @gc_dot ) "++Added by Ragni on 30Jul2026
+*        AND rqclient EQ sy-mandt
+*      AND rqowner = @sy-uname
+*      AND  rq0name = @ls_nast-dsnam
+*      AND rq1name = @ls_nast-dsuf1
+*      AND rq2name = @ls_nast-dsuf2
+*      AND rqcretime LIKE @lv_datum.
+*      IF sy-subrc = 0.
+**        SORT lt_tsp01 BY rqowner rqcretime DESCENDING.
+*        SORT lt_tsp01 BY rqcretime DESCENDING.
+**        DELETE ADJACENT DUPLICATES FROM lt_tsp01 COMPARING rqowner.
+*        gv_spoolid_1 = lt_tsp01[ 1 ]-rqident.  " newest first
+*      ENDIF.
+*    ENDIF.
+* EOC by Ragni on 03Aug2026
+    """"""""""
+    CALL FUNCTION 'WFMC_MESSAGE_SINGLE'
+      EXPORTING
+        pi_nast  = ls_nast
+      IMPORTING
+        pe_rcode = lv_rcode.
+
+    IF lv_rcode <> 0.
+      RETURN.
+    ELSEIF lv_rcode = 0.
+      CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+        EXPORTING
+          wait = gc_x.
+
+      " 4) Pick latest spool by user (your approach)
+* BOC by Ragni on 03Aug2026
+      DATA(lv_datum)  = |{ ls_nast-erdat }%|.
+*      CLEAR lt_tsp01.
+      SELECT rqident,rqclient, rqowner, rqfinal,rqcretime
+        FROM tsp01
+        INTO TABLE @DATA(lt_tsp01)
+        WHERE ( rqfinal = @gc_c
+         OR rqfinal = @gc_dot ) "++Added by Ragni on 30Jul2026
+        AND rqclient EQ @sy-mandt
+      AND rqowner = @sy-uname
+      AND  rq0name = @ls_nast-dsnam
+      AND rq1name = @ls_nast-dsuf1
+      AND rq2name = @ls_nast-dsuf2
+      AND rqcretime LIKE @lv_datum.
+*       " WHERE rqident > @gv_spoolid_1
+*        AND rqowner = @sy-uname
+*        AND  rqclient = @sy-mandt
+*        AND ( rqfinal = @gc_c
+*         OR rqfinal = @gc_dot ) "++Added by Ragni on 30Jul2026
+*        AND rqcretime LIKE @lv_datum .
+      IF sy-subrc = 0.
+*        SORT lt_tsp01 BY rqowner rqcretime DESCENDING.
+        SORT lt_tsp01 BY rqcretime DESCENDING.
+*        DELETE ADJACENT DUPLICATES FROM lt_tsp01 COMPARING rqowner.
+        gv_spoolid  = lt_tsp01[ 1 ]-rqident.  " newest first
+* EOC by Ragni on 03Aug2026
+      ELSE.
+        RETURN.
+      ENDIF.
+      CLEAR lv_datum.
+
+      IF gv_spoolid IS INITIAL.
+        rv_ok = abap_false.
+        MESSAGE s069(zs_mtc_sd) DISPLAY LIKE gc_e.
+        RETURN.
+      ENDIF.
+      " 5) OTF -> PDF(TLINE) with exact bytecount
+
+      DATA lv_xpdf TYPE xstring.
+      CALL FUNCTION 'CONVERT_OTFSPOOLJOB_2_PDF'
+        EXPORTING
+          src_spoolid     = gv_spoolid
+          no_dialog       = gc_x
+          pdf_destination = gc_x
+        IMPORTING
+          bin_file        = lv_xpdf
+          pdf_bytecount   = ev_size
+        EXCEPTIONS
+          OTHERS          = 12.
+      IF sy-subrc <> 0 OR lv_xpdf IS INITIAL OR ev_size <= 0.
+        RETURN.
+      ENDIF.
+
+      et_solix = cl_bcs_convert=>xstring_to_solix( iv_xstring = lv_xpdf ).
+      rv_ok = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD generate_attachment.
+    DATA: lv_size  TYPE i,
+          lv_info  TYPE string,
+          lt_solix TYPE solix_tab.
+
+    CONSTANTS lc_pdf TYPE so_obj_tp VALUE 'PDF'.
+
+    CLEAR: ev_size, rs_attach.
+
+    " 1) Generate SOLIX + size (reuse the same hub method)
+    DATA(lv_ok) = me->try_generate_pdf_tline(
+                    EXPORTING iv_docnum       = iv_docnum
+                              iv_doc_category = iv_doc_category
+                              iv_key          = iv_key
+                    IMPORTING et_solix        = lt_solix
+                              ev_size         = lv_size
+                              ev_msg          = lv_info ).
+
+    IF lv_ok <> abap_true OR lt_solix IS INITIAL OR lv_size <= 0.
+      RETURN.
+    ENDIF.
+
+    " 2) Subject = FSD file name (no path)
+    DATA(lv_filename) = me->build_filename(
+                          iv_doc_category = iv_doc_category
+                          iv_docnum      = iv_docnum ).
+
+    rs_attach-type    = lc_pdf.
+    rs_attach-subject = lv_filename.
+    rs_attach-content = lt_solix.
+    ev_size           = lv_size.
+
+  ENDMETHOD.
+
+
+  METHOD download_single_pdf.
+
+    DATA: lt_solix TYPE solix_tab,
+          lv_size  TYPE i,
+          lv_info  TYPE string,
+          lv_name  TYPE string,
+          lv_full  TYPE string.
+
+    CONSTANTS lc_bin  TYPE char10 VALUE 'BIN'.
+    rv_ok = abap_false.
+
+    IF iv_folder IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_ok) = me->try_generate_pdf_tline(
+        EXPORTING iv_docnum       = iv_docnum
+                  iv_doc_category = iv_doc_category
+                  iv_key          = iv_key
+        IMPORTING et_solix        = lt_solix
+                  ev_size         = lv_size
+                  ev_msg          = lv_info ).
+
+
+    IF lv_ok <> abap_true OR lt_solix IS INITIAL OR lv_size <= 0.
+      RETURN.
+    ENDIF.
+
+    " 3) Build FSD filename and full path
+    lv_name = me->build_filename(
+                iv_doc_category = iv_doc_category
+                iv_docnum      = iv_docnum ).
+    lv_full = me->build_fullpath(
+                iv_dir  = iv_folder
+                iv_name = lv_name ).
+
+    " 4) Write the binary (TLINE -> BIN) once
+
+    cl_gui_frontend_services=>gui_download(
+        EXPORTING
+          filename     = lv_full
+          filetype     = lc_bin
+          bin_filesize = lv_size
+        CHANGING
+          data_tab     = lt_solix
+
+    EXCEPTIONS
+    file_write_error          = 1
+    no_batch                  = 2
+    gui_refuse_filetransfer   = 3
+    invalid_type              = 4
+    no_authority              = 5
+    unknown_error             = 6
+    header_not_allowed        = 7
+    separator_not_allowed     = 8
+    filesize_not_allowed      = 9
+    header_too_long           = 10
+    dp_error_create           = 11
+    dp_error_send             = 12
+    dp_error_write            = 13
+    unknown_dp_error          = 14
+    access_denied             = 15
+    dp_out_of_memory          = 16
+    disk_full                 = 17
+    dp_timeout                = 18
+    file_not_found            = 19
+    dataprovider_exception    = 20
+    control_flush_error       = 21
+    not_supported_by_gui      = 22
+    error_no_gui              = 23
+    OTHERS                    = 24
+       ) .
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE gc_i   NUMBER sy-msgno DISPLAY LIKE gc_e
+              WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4  .
+      RETURN.
+    ELSE.
+      rv_ok = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD can_download_any.
+    DATA(lv_yes) = abap_false.
+
+    " --- Deliveries (GI-dependent: Delivery Note / Packing List;) ---
+    IF lv_yes = abap_false AND gt_view_delivery IS NOT INITIAL.
+      LOOP AT gt_view_delivery ASSIGNING FIELD-SYMBOL(<d>).
+        IF cb_dlvnt = abap_true AND
+           me->gi_block_if_needed( iv_cat = gc_cat_dlvn iv_id = <d>-vbeln ) = abap_false.
+          lv_yes = abap_true.
+          EXIT.
+        ENDIF.
+        IF lv_yes = abap_false AND cb_pklst = abap_true AND
+           me->gi_block_if_needed( iv_cat = gc_cat_pklst iv_id = <d>-vbeln ) = abap_false.
+          lv_yes = abap_true.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    " --- Shipments (GI-independent: Shipment Request / Loading List) ---
+    IF lv_yes = abap_false AND gt_view_shipment IS NOT INITIAL.
+      IF cb_shprq = abap_true OR cb_ldlst = abap_true OR cb_cmr = abap_true.
+        lv_yes = abap_true.
+      ENDIF.
+    ENDIF.
+
+    " --- Sales Invoice (GI-dependent via linked deliveries) ---
+    IF lv_yes = abap_false AND cb_sinv = abap_true AND gt_view_invoice IS NOT INITIAL.
+      LOOP AT gt_view_invoice ASSIGNING FIELD-SYMBOL(<i>).
+        IF me->gi_block_if_needed( iv_cat = gc_cat_sinv iv_id = <i>-vbeln ) = abap_false.
+          lv_yes = abap_true. EXIT.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    " --- Proforma (GI-dependent via linked deliveries) ---
+    IF lv_yes = abap_false AND cb_prfin = abap_true AND gt_view_proforma IS NOT INITIAL.
+      LOOP AT gt_view_proforma ASSIGNING FIELD-SYMBOL(<p>).
+        IF me->gi_block_if_needed( iv_cat = gc_cat_prfin iv_id = <p>-vbeln ) = abap_false.
+          lv_yes = abap_true.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    rv_can = lv_yes.
+  ENDMETHOD.
+  METHOD get_deliveries_without_gi.
+
+    DATA lt_no_gi TYPE STANDARD TABLE OF string.
+
+    CLEAR et_no_gi.
+
+    IF it_delivery IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT it_delivery ASSIGNING FIELD-SYMBOL(<fs_del>).
+
+      IF me->gi_block_if_needed(
+           iv_cat = gc_cat_dlvn
+           iv_id  = <fs_del>-vbeln ) = abap_true.
+
+        APPEND me->normalize_id( <fs_del>-vbeln ) TO lt_no_gi.
+      ENDIF.
+
+    ENDLOOP.
+
+    SORT lt_no_gi.
+    DELETE ADJACENT DUPLICATES FROM lt_no_gi.
+
+    et_no_gi = lt_no_gi.
+
+  ENDMETHOD.
+
+
+  METHOD process_download.
+    DATA :lv_dlvn_msg   TYPE string,
+          lt_dlvn_no_gi TYPE ty_string_tab.
+    CLEAR: lv_dlvn_msg,lt_dlvn_no_gi.
+
+    IF me->can_download_any( ) <> abap_true.
+      MESSAGE s056(zs_mtc_sd) DISPLAY LIKE gc_e.
+      RETURN.
+    ENDIF.
+    IF ( cb_dlvnt = abap_true OR cb_pklst = abap_true )" OR cb_cmr = abap_true )
+        AND gt_view_delivery IS NOT INITIAL.
+      me->preload_mkpf_for_deliveries( EXPORTING it_delivery = gt_view_delivery ).
+    ENDIF.
+
+    IF ( cb_sinv = abap_true OR cb_prfin = abap_true )
+         AND gt_view_invoice  IS NOT INITIAL.
+      me->preload_bkpf_for_billings( EXPORTING it_billing  = gt_view_invoice  ).
+    ENDIF.
+
+    DATA(lv_base_dir) = p_dlpath.
+    CONDENSE lv_base_dir.
+    IF lv_base_dir IS INITIAL.
+      MESSAGE s059(zs_mtc_sd) DISPLAY LIKE gc_e.
+      RETURN.
+    ENDIF.
+
+    IF gt_view_delivery IS NOT INITIAL.
+      me->get_deliveries_without_gi(
+        EXPORTING
+          it_delivery = gt_view_delivery
+        IMPORTING
+          et_no_gi    = lt_dlvn_no_gi ).
+
+
+      LOOP AT gt_view_delivery ASSIGNING FIELD-SYMBOL(<fs_del>).
+        IF line_exists( lt_dlvn_no_gi[ table_line = me->normalize_id( <fs_del>-vbeln ) ] ).
+          CONTINUE.
+        ENDIF.
+
+        IF cb_dlvnt = abap_true.
+          me->download_single_pdf(
+            EXPORTING iv_docnum       = <fs_del>-vbeln
+                      iv_doc_category = gc_cat_dlvn
+                      iv_key          = |{ gc_cat_dlvn }{ gc_sep }{ p_vkorg }|
+                      iv_folder       = lv_base_dir
+            RECEIVING rv_ok           = DATA(l_ok_dn) ).
+
+
+        ENDIF.
+
+        IF cb_pklst = abap_true.
+          me->download_single_pdf(
+            EXPORTING iv_docnum       = <fs_del>-vbeln
+                      iv_doc_category = gc_cat_pklst
+                      iv_key          = |{ gc_cat_pklst }{ gc_sep }{ p_vkorg }|
+                      iv_folder       = lv_base_dir
+            RECEIVING rv_ok           = DATA(l_ok_pl) ).
+
+
+        ENDIF.
+
+        """""""""""""""""""""""cmr is not defined yet""""""""""""""""""""
+        """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+      ENDLOOP.
+    ENDIF.
+
+    " 5. Shipment Request
+
+    IF gt_view_shipment IS NOT INITIAL.
+
+      LOOP AT gt_view_shipment ASSIGNING FIELD-SYMBOL(<fs_shp>).
+        IF cb_shprq = abap_true.
+          me->download_single_pdf(
+            EXPORTING iv_docnum       = <fs_shp>-tknum
+                      iv_doc_category = gc_cat_shprq
+                      iv_key          = |{ gc_cat_shprq }{ gc_sep }{ p_tplst }|
+                      iv_folder       = lv_base_dir
+            RECEIVING rv_ok           = DATA(l_ok_sr) ).
+        ENDIF.
+        IF cb_ldlst = abap_true.
+          me->download_single_pdf(
+            EXPORTING iv_docnum       = <fs_shp>-tknum
+                      iv_doc_category = gc_cat_ldlst
+                      iv_key          = |{ gc_cat_ldlst }{ gc_sep }{ p_tplst }|
+                      iv_folder       = lv_base_dir
+            RECEIVING rv_ok           = DATA(l_ok_ll) ).
+        ENDIF.
+        IF cb_cmr = abap_true.
+          me->download_single_pdf(
+            EXPORTING iv_docnum       = <fs_shp>-tknum
+                      iv_doc_category = gc_cat_cmr
+                      iv_key          = |{ gc_cat_cmr }{ gc_sep }{ p_vkorg }|
+                      iv_folder       = lv_base_dir
+            RECEIVING rv_ok           = DATA(l_ok_cm) ).
+        ENDIF.
+      ENDLOOP.
+      UNASSIGN <fs_shp>.
+    ENDIF.
+
+
+    " 7. Sales Invoice
+    IF cb_sinv = abap_true AND gt_view_invoice IS NOT INITIAL.
+
+      LOOP AT gt_view_invoice ASSIGNING FIELD-SYMBOL(<fs_inv>).
+
+        IF me->gi_block_if_needed(
+                            iv_cat = gc_cat_sinv
+                            iv_id  = <fs_inv>-vbeln ) = abap_false.
+
+          me->download_single_pdf(
+            EXPORTING iv_docnum       = <fs_inv>-vbeln
+                      iv_doc_category = gc_cat_sinv
+                      iv_key          = |{ gc_cat_billdoc }{ gc_sep }{ p_vkorg }|
+                      iv_folder       = lv_base_dir
+            RECEIVING rv_ok           = DATA(l_ok_si) ).
+
+        ENDIF.
+      ENDLOOP.
+      UNASSIGN <fs_inv>.
+    ENDIF.
+
+
+    " 8. Proforma Invoice
+
+    IF cb_prfin = abap_true AND gt_view_proforma IS NOT INITIAL.
+      LOOP AT gt_view_proforma ASSIGNING FIELD-SYMBOL(<fs_prf>).
+
+        IF me->gi_block_if_needed(
+                           iv_cat = gc_cat_prfin
+                           iv_id  = <fs_prf>-vbeln ) = abap_false.
+
+          me->download_single_pdf(
+            EXPORTING iv_docnum       = <fs_prf>-vbeln
+                      iv_doc_category = gc_cat_prfin
+                      iv_key          = |{ gc_cat_prfin }{ gc_sep }{ p_vkorg }|
+                      iv_folder       = lv_base_dir
+            RECEIVING rv_ok           = DATA(l_ok_pf) ).
+        ENDIF.
+      ENDLOOP.
+      UNASSIGN <fs_prf>.
+    ENDIF.
+    """"""""""""""""To show the message that for which deliveries GI is not done""""""""""""""
+    IF ( cb_dlvnt = abap_true
+       OR cb_pklst = abap_true
+       OR cb_cmr   = abap_true
+       OR cb_sinv  = abap_true
+       OR cb_prfin = abap_true )
+       AND lt_dlvn_no_gi IS NOT INITIAL.
+
+
+      SORT lt_dlvn_no_gi.
+      DELETE ADJACENT DUPLICATES FROM lt_dlvn_no_gi.
+
+      CONCATENATE LINES OF lt_dlvn_no_gi
+        INTO lv_dlvn_msg
+        SEPARATED BY ', '.
+
+      DATA(lv_textline1) = |{ text-014 } { lv_dlvn_msg } { text-015 }|.
+
+      CALL FUNCTION 'POPUP_TO_DISPLAY_TEXT'
+        EXPORTING
+          titel        = text-013
+          textline1    = lv_textline1
+          textline2    = text-016
+          start_column = 25
+          start_row    = 12.
+
+      CLEAR:lv_textline1.
+    ENDIF.
+  ENDMETHOD.
+
+
+
+  "-----------------------------
+  " SO10: read standard text
+  "-----------------------------
+
+  METHOD get_so10_text.
+    DATA: lt_lines TYPE STANDARD TABLE OF tline.
+
+    CONSTANTS: lc_text TYPE thead-tdobject VALUE 'TEXT',
+               lc_st   TYPE thead-tdid VALUE 'ST'.
+    CLEAR et_text.
+
+    CALL FUNCTION 'READ_TEXT'
+      EXPORTING
+        id                      = lc_st
+        language                = sy-langu
+        name                    = iv_name
+        object                  = lc_text
+      TABLES
+        lines                   = lt_lines
+      EXCEPTIONS
+        id                      = 1
+        language                = 2
+        name                    = 3
+        not_found               = 4
+        object                  = 5
+        reference_check         = 6
+        wrong_access_to_archive = 7
+        OTHERS                  = 8.
+    IF sy-subrc <> 0.
+      CLEAR lt_lines.
+    ENDIF.
+
+
+    " Convert TLINE -> bcsy_text (SOLI)
+    LOOP AT lt_lines ASSIGNING FIELD-SYMBOL(<l>).
+      APPEND <l>-tdline TO et_text.
+    ENDLOOP.
+  ENDMETHOD.
+
+  "-----------------------------
+  " Join bcsy_text into a string
+  "-----------------------------
+
+  METHOD bcsy_to_string.
+    LOOP AT it_text ASSIGNING FIELD-SYMBOL(<t>).
+      IF rv_string IS INITIAL.
+        rv_string = <t>-line.
+      ELSE.
+        rv_string = |{ rv_string } { <t>-line }|.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  "---------------------------------------------
+  " Convert select-options to ';' separated CSV
+  "---------------------------------------------
+  METHOD csv_from_sels.
+
+    DATA:lv TYPE string.
+
+    LOOP AT it_sels ASSIGNING FIELD-SYMBOL(<s>).
+      IF lv IS INITIAL.
+        lv = <s>-low.
+      ELSE.
+        lv = lv && ';' && <s>-low.
+      ENDIF.
+    ENDLOOP.
+    rv_csv = lv.
+    CLEAR lv.
+  ENDMETHOD.
+
+  "=============================================
+  " EMAIL: direct send now; preview later
+  "=============================================
+  METHOD process_email.
+    DATA: lv_sname TYPE tdobname,
+          lv_bname TYPE tdobname.
+
+    IF it_group IS INITIAL.
+      MESSAGE s056(zs_mtc_sd)  DISPLAY LIKE gc_e.
+      RETURN.
+    ENDIF.
+
+
+    DATA: lt_dlvn_no_gi TYPE ty_string_tab,
+          lv_dlvn_msg   TYPE string.
+
+
+    IF gt_view_delivery IS NOT INITIAL
+    AND ( cb_dlvnt = abap_true
+       OR cb_pklst = abap_true
+       OR cb_cmr   = abap_true
+       OR cb_sinv  = abap_true
+       OR cb_prfin = abap_true ).
+
+      me->get_deliveries_without_gi(
+        EXPORTING
+          it_delivery = gt_view_delivery
+        IMPORTING
+          et_no_gi    = lt_dlvn_no_gi ).
+
+      IF lt_dlvn_no_gi IS NOT INITIAL.
+        SORT lt_dlvn_no_gi.
+        DELETE ADJACENT DUPLICATES FROM lt_dlvn_no_gi.
+
+        CONCATENATE LINES OF lt_dlvn_no_gi
+          INTO lv_dlvn_msg
+          SEPARATED BY ', '.
+
+        DATA(lv_textline1) = |{ text-014 } { lv_dlvn_msg } { text-015 }|.
+
+        CALL FUNCTION 'POPUP_TO_DISPLAY_TEXT'
+          EXPORTING
+            titel     = text-013
+            textline1 = lv_textline1
+            textline2 = text-016.
+      ENDIF.
+    ENDIF.
+
+    " --- PREVIEW PATH ---
+    IF p_prev = abap_true.
+
+      me->fill_alv_documents( it_group = gt_group ).
+
+
+      IF gt_alv IS INITIAL.
+        MESSAGE i057(zs_mtc_sd).
+        RETURN.
+      ENDIF.
+
+      me->display_alv( ).
+      RETURN.
+    ENDIF.
+
+    " --- DIRECT SEND PATH (p_prev is initial) ---
+
+    IF ( cb_dlvnt = abap_true OR cb_pklst = abap_true )" OR cb_cmr = abap_true )
+            AND gt_view_delivery IS NOT INITIAL.
+      me->preload_mkpf_for_deliveries( EXPORTING it_delivery = gt_view_delivery ).
+    ENDIF.
+    IF ( cb_sinv = abap_true OR cb_prfin = abap_true )
+         AND gt_view_invoice  IS NOT INITIAL.
+      me->preload_bkpf_for_billings( EXPORTING it_billing  = gt_view_invoice  ).
+    ENDIF.
+    DATA lt_attach  TYPE zattachement_tt.
+    DATA ls_att  TYPE zattachement.
+    DATA lv_ign     TYPE i.
+    DATA: lv_subject1 TYPE so_obj_des.
+
+
+
+    DATA lt_body TYPE bcsy_text.
+    DATA lt_obj  TYPE bcsy_text.
+
+    CLEAR: lv_sname, lv_bname.
+
+    lo_main->get_text_name( EXPORTING iv_type = gc_sub "++@@Added by Ragni Chandrawanshi on 03Mar2026
+                             IMPORTING ev_name = lv_sname )."++@@Added by Ragni Chandrawanshi on 27Feb2026
+    lo_main->get_text_name( EXPORTING iv_type = gc_body "++@@Added by Ragni Chandrawanshi on 03Mar2026
+                            IMPORTING ev_name = lv_bname )."++@@Added by Ragni Chandrawanshi on 03Mar2026
+    me->get_so10_text( EXPORTING iv_name = lv_bname "'ZMAILOUTBODY' "++@@Added by Ragni Chandrawanshi on 03Mar2026
+                       IMPORTING et_text = lt_body ).
+    me->get_so10_text( EXPORTING iv_name = lv_sname "'ZMAILOUTOBJ' "++@@Modified by Ragni Chandrawanshi on 27Feb2026
+                       IMPORTING et_text = lt_obj  ).
+    DATA lv_subject_base TYPE so_obj_des.
+    lv_subject_base = me->bcsy_to_string( lt_obj ).
+    lv_subject1 = lv_subject_base.
+
+    LOOP AT it_group INTO DATA(ls_row)
+          GROUP BY ( group = ls_row-group )
+          ASCENDING
+          ASSIGNING FIELD-SYMBOL(<grp>).
+      DATA(lv_grp_txt) = COND string( WHEN <grp>-group IS INITIAL THEN `N/A` ELSE <grp>-group ).
+
+      CLEAR lt_attach.
+
+      LOOP AT GROUP <grp> ASSIGNING FIELD-SYMBOL(<gdoc>).
+
+        CASE <gdoc>-doc_typ.
+
+          WHEN c_deliv.
+            IF cb_dlvnt = abap_true.
+              CLEAR :ls_att, lv_ign.
+              ls_att = me->generate_attachment(
+                           EXPORTING iv_docnum       = <gdoc>-doc_no
+                                     iv_doc_category = gc_cat_dlvn
+                                     iv_key          = |{ gc_cat_dlvn }{ gc_sep }{ p_vkorg }|
+                           IMPORTING ev_size         = lv_ign ).
+              IF ls_att-content IS NOT INITIAL AND lv_ign > 0.
+                APPEND ls_att TO lt_attach.
+              ENDIF.
+
+            ENDIF.
+            IF cb_pklst = abap_true.
+              CLEAR:ls_att,lv_ign.
+
+              ls_att = me->generate_attachment(
+                          EXPORTING iv_docnum       = <gdoc>-doc_no
+                                    iv_doc_category = gc_cat_pklst
+                                    iv_key          = |{ gc_cat_pklst }{ gc_sep }{ p_vkorg }|
+                          IMPORTING ev_size         = lv_ign ).
+              IF ls_att-content IS NOT INITIAL AND lv_ign > 0.
+                APPEND ls_att TO lt_attach.
+              ENDIF.
+
+            ENDIF.
+
+            """"""""""""""""""cmr is not defined"""""""""""""'
+            """"""""""""""""""""""""""""""""""""""""""""""""""""
+          WHEN c_ship.
+            IF cb_shprq = abap_true.
+              CLEAR:ls_att,lv_ign.
+              ls_att = me->generate_attachment(
+                           EXPORTING iv_docnum       = <gdoc>-doc_no
+                                     iv_doc_category = gc_cat_shprq
+                                     iv_key          = |{ gc_cat_shprq }{ gc_sep }{ p_tplst }|
+                           IMPORTING ev_size         = lv_ign ).
+              IF ls_att-content IS NOT INITIAL AND lv_ign > 0.
+                APPEND ls_att TO lt_attach.
+              ENDIF.
+            ENDIF.
+
+            IF cb_ldlst = abap_true.
+              CLEAR:ls_att,lv_ign.
+
+              ls_att = me->generate_attachment(
+                           EXPORTING iv_docnum       = <gdoc>-doc_no
+                                     iv_doc_category = gc_cat_ldlst
+                                     iv_key          = |{ gc_cat_ldlst }{ gc_sep }{ p_tplst }|
+                           IMPORTING ev_size         = lv_ign ).
+              IF ls_att-content IS NOT INITIAL AND lv_ign > 0.
+                APPEND ls_att TO lt_attach.
+              ENDIF.
+
+            ENDIF.
+
+          WHEN c_sinv.
+            IF cb_sinv = abap_true.
+              CLEAR:ls_att,lv_ign.
+
+              ls_att = me->generate_attachment(
+                           EXPORTING iv_docnum       = <gdoc>-doc_no
+                                     iv_doc_category = gc_cat_sinv
+                                     iv_key          = |{ gc_cat_billdoc }{ gc_sep }{ p_vkorg }|
+                           IMPORTING ev_size         = lv_ign ).
+              IF ls_att-content IS NOT INITIAL AND lv_ign > 0.
+                APPEND ls_att TO lt_attach.
+              ENDIF.
+
+            ENDIF.
+
+          WHEN c_pro.
+            IF cb_prfin = abap_true.
+              CLEAR:ls_att,lv_ign.
+              ls_att = me->generate_attachment(
+                           EXPORTING iv_docnum       = <gdoc>-doc_no
+                                     iv_doc_category = gc_cat_prfin
+                                     iv_key          = |{ gc_cat_prfin }{ gc_sep }{ p_vkorg }|
+                           IMPORTING ev_size         = lv_ign ).
+              IF ls_att-content IS NOT INITIAL AND lv_ign > 0.
+                APPEND ls_att TO lt_attach.
+              ENDIF.
+            ENDIF.
+        ENDCASE.
+      ENDLOOP.
+
+      IF lt_attach IS INITIAL.
+        MESSAGE s062(zs_mtc_sd) DISPLAY LIKE gc_e .
+        CONTINUE.
+      ENDIF.
+
+      DATA(lo_email) = NEW zcl_email_sender( ).
+      DATA(lv_ok) = lo_email->send_email(
+        iv_subject        = lv_subject1
+*        iv_long_subject   = lv_subject
+        it_body           = lt_body
+        iv_sender         = p_sender
+        iv_recipients     = me->csv_from_sels( s_rcv[] )
+        iv_cc             = me->csv_from_sels( s_cc[] )
+        iv_doc_type       = 'RAW'
+        iv_delimiter      = ';'
+        iv_attachment_type = 'PDF'
+        it_attachments    = lt_attach ).
+
+
+      IF lv_ok = abap_true.
+        MESSAGE s064(zs_mtc_sd).
+      ELSE.
+        MESSAGE i063(zs_mtc_sd) DISPLAY LIKE gc_e WITH lv_grp_txt .
+        CONTINUE.
+      ENDIF.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD normalize_id.
+
+    DATA lv_raw TYPE char40.
+    DATA lv_out TYPE char40.
+
+    lv_raw = CONV char40( iv_any ).
+
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = lv_raw
+      IMPORTING
+        output = lv_out
+      EXCEPTIONS
+        OTHERS = 1.
+
+    IF sy-subrc <> 0.
+      lv_out = lv_raw.  " fallback
+    ENDIF.
+
+    SHIFT lv_out LEFT DELETING LEADING space.
+    rv_txt = lv_out.
+
+  ENDMETHOD.
+
+  METHOD display_alv.
+    " Build field catalog
+    CLEAR gs_fcat.
+    gs_fcat-fieldname = gc_check_box.
+    gs_fcat-coltext   = text-009.
+    gs_fcat-checkbox  = abap_true.
+    gs_fcat-edit      = abap_true.
+    APPEND gs_fcat TO gt_fcat.
+
+    CLEAR gs_fcat.
+    gs_fcat-fieldname = gc_document.
+    gs_fcat-coltext   = text-010.
+    APPEND gs_fcat TO gt_fcat.
+
+    CLEAR gs_fcat.
+    gs_fcat-fieldname = gc_group.
+    gs_fcat-coltext   = text-011.
+    APPEND gs_fcat TO gt_fcat.
+
+*      CLEAR g_container.
+    IF g_container IS INITIAL.
+      CREATE OBJECT g_container
+        EXPORTING
+          container_name = 'CONT'.
+
+      CREATE OBJECT g_grid
+        EXPORTING
+          i_parent = g_container.
+    ENDIF.
+    CALL SCREEN 100.
+
+  ENDMETHOD.
+
+  METHOD fill_alv_documents.
+
+    DATA get_group_num TYPE i.
+    CLEAR gt_alv.
+
+    IF ( cb_dlvnt = abap_true OR cb_pklst = abap_true )" OR cb_cmr = abap_true )
+     AND gt_view_delivery IS NOT INITIAL.
+      me->preload_mkpf_for_deliveries( EXPORTING it_delivery = gt_view_delivery ).
+    ENDIF.
+
+    IF ( cb_sinv = abap_true OR cb_prfin = abap_true )
+     AND gt_view_invoice IS NOT INITIAL.
+      me->preload_bkpf_for_billings( EXPORTING it_billing  = gt_view_invoice ).
+    ENDIF.
+
+
+    IF gt_view_shipment IS NOT INITIAL AND
+       ( cb_shprq = abap_true OR cb_ldlst = abap_true OR cb_cmr = abap_true ).
+
+      DATA(lv_key_sr) = |{ gc_cat_shprq }{ gc_sep }{ p_tplst }|.
+      DATA(lv_key_ll) = |{ gc_cat_ldlst }{ gc_sep }{ p_tplst }|.
+      DATA(lv_key_cm) = |{ gc_cat_cmr }{ gc_sep }{ p_vkorg }|.
+
+      LOOP AT gt_view_shipment ASSIGNING FIELD-SYMBOL(<shp>).
+        CLEAR get_group_num.
+        ASSIGN gt_group[ doc_typ = c_ship
+                   doc_no  = <shp>-tknum  ]
+         TO FIELD-SYMBOL(<g>).
+
+        IF <g> IS ASSIGNED.
+          get_group_num = <g>-group.
+          UNASSIGN <g>.
+        ENDIF.
+        IF get_group_num = 0.
+          CONTINUE.
+        ENDIF.
+
+        IF cb_shprq = abap_true.
+
+          READ TABLE gt_doc_output_types ASSIGNING FIELD-SYMBOL(<fs_map_sr>) WITH KEY doc_key = lv_key_sr BINARY SEARCH.
+          IF  <fs_map_sr> IS ASSIGNED AND <fs_map_sr>-output_type IS NOT INITIAL.
+            CLEAR gs_alv.
+            gs_alv-check_box = gc_x.
+            gs_alv-document  = me->build_filename(
+                                 iv_doc_category = gc_cat_shprq
+                                 iv_docnum       = <shp>-tknum ).
+            gs_alv-group     = |{ text-011 }{ get_group_num }|. ""text-011 = Group
+
+            gs_alv-doc_cat   = gc_cat_shprq.
+            gs_alv-doc_id    = |{  <shp>-tknum  ALPHA = IN }|.
+            APPEND gs_alv TO gt_alv.
+            UNASSIGN <fs_map_sr>.
+          ENDIF.
+        ENDIF.
+
+        IF cb_ldlst = abap_true.
+          READ TABLE gt_doc_output_types ASSIGNING FIELD-SYMBOL(<fs_map_ll>) WITH KEY doc_key = lv_key_ll BINARY SEARCH.
+          IF  <fs_map_ll> IS ASSIGNED AND <fs_map_ll>-output_type IS NOT INITIAL.
+            CLEAR gs_alv.
+            gs_alv-check_box = gc_x.
+            gs_alv-document  = me->build_filename(
+                                 iv_doc_category = gc_cat_ldlst
+                                 iv_docnum       = <shp>-tknum ).
+            gs_alv-group     = |{ text-011 }{ get_group_num }|.
+            gs_alv-doc_cat   = gc_cat_ldlst.
+            gs_alv-doc_id    = |{  <shp>-tknum ALPHA = IN }|.
+            APPEND gs_alv TO gt_alv.
+            UNASSIGN <fs_map_ll>.
+          ENDIF.
+        ENDIF.
+
+        IF cb_cmr = abap_true.
+          READ TABLE gt_doc_output_types ASSIGNING FIELD-SYMBOL(<fs_map_cm>) WITH KEY doc_key = lv_key_cm BINARY SEARCH.
+          IF  <fs_map_cm> IS ASSIGNED AND <fs_map_cm>-output_type IS NOT INITIAL.
+            CLEAR gs_alv.
+            gs_alv-check_box = gc_x.
+            gs_alv-document  = me->build_filename(
+                                 iv_doc_category = gc_cat_cmr
+                                 iv_docnum       = <shp>-tknum ).
+            gs_alv-group     = |{ text-011 }{ get_group_num }|.
+            gs_alv-doc_cat   = gc_cat_cmr.
+            gs_alv-doc_id    = |{  <shp>-tknum ALPHA = IN }|.
+            APPEND gs_alv TO gt_alv.
+            UNASSIGN <fs_map_cm>.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+    IF <shp> IS ASSIGNED.
+      UNASSIGN <shp>.
+    ENDIF.
+
+
+    IF gt_view_delivery IS NOT INITIAL AND
+       ( cb_dlvnt = abap_true OR cb_pklst = abap_true ).
+
+      DATA(lv_key_dn) = |{ gc_cat_dlvn }{ gc_sep }{ p_vkorg }|.
+      DATA(lv_key_pl) = |{ gc_cat_pklst }{ gc_sep }{ p_vkorg }|.
+
+
+      LOOP AT gt_view_delivery ASSIGNING FIELD-SYMBOL(<del>).
+        CLEAR get_group_num.
+        ASSIGN gt_group[ doc_typ = c_deliv
+                         doc_no  = <del>-vbeln  ] TO <g>.
+        IF <g> IS ASSIGNED.
+          get_group_num = <g>-group.
+          UNASSIGN <g>.
+        ENDIF.
+        IF get_group_num = 0.
+          CONTINUE.
+        ENDIF.
+
+        IF cb_dlvnt = abap_true AND
+           me->gi_block_if_needed( iv_cat = gc_cat_dlvn
+                                   iv_id  = <del>-vbeln ) = abap_false.
+          READ TABLE gt_doc_output_types ASSIGNING FIELD-SYMBOL(<fs_map_dn>) WITH KEY doc_key = lv_key_dn BINARY SEARCH.
+          IF <fs_map_dn> IS ASSIGNED AND <fs_map_dn>-output_type IS NOT INITIAL.
+
+
+            CLEAR gs_alv.
+            gs_alv-check_box = gc_x.
+            gs_alv-document  = me->build_filename(
+                                 iv_doc_category = gc_cat_dlvn
+                                 iv_docnum       = <del>-vbeln ).
+            gs_alv-group     = |{ text-011 }{ get_group_num }|.
+            gs_alv-doc_cat   = gc_cat_dlvn.
+            gs_alv-doc_id    = |{ <del>-vbeln ALPHA = IN }|.
+            APPEND gs_alv TO gt_alv.
+            UNASSIGN <fs_map_dn>.
+          ENDIF.
+        ENDIF.
+
+
+        IF cb_pklst = abap_true AND
+           me->gi_block_if_needed( iv_cat = gc_cat_pklst
+                                   iv_id  = <del>-vbeln ) = abap_false.
+          READ TABLE gt_doc_output_types ASSIGNING FIELD-SYMBOL(<fs_map_pl>) WITH KEY doc_key = lv_key_pl
+           BINARY SEARCH.
+
+          IF <fs_map_pl> IS ASSIGNED AND <fs_map_pl>-output_type IS NOT INITIAL.
+
+            CLEAR gs_alv.
+            gs_alv-check_box = gc_x.
+            gs_alv-document  = me->build_filename(
+                                 iv_doc_category = gc_cat_pklst
+                                 iv_docnum       = <del>-vbeln ).
+            gs_alv-group     = |{ text-011 }{ get_group_num }|.
+            gs_alv-doc_cat   = gc_cat_pklst.
+            gs_alv-doc_id    = |{  <del>-vbeln ALPHA = IN }|.
+            APPEND gs_alv TO gt_alv.
+            UNASSIGN <fs_map_pl>.
+          ENDIF.
+        ENDIF.
+
+        """"""""""""""""""""""""""""cmr is not defined""""""""""""""""""""""
+
+        """"""""""""""""""""""""""""""""cmr"""""""""""""""""""""""""""""""""""
+      ENDLOOP.
+    ENDIF.
+    IF <shp> IS ASSIGNED.
+      UNASSIGN <shp>.
+    ENDIF.
+
+    IF ( gt_view_invoice  IS NOT INITIAL OR gt_view_proforma IS NOT INITIAL ) AND
+       ( cb_sinv = abap_true OR cb_prfin = abap_true ).
+
+
+      IF cb_sinv = abap_true AND gt_view_invoice IS NOT INITIAL.
+        DATA(lv_key_si) = |{ gc_cat_billdoc }{ gc_sep }{ p_vkorg }|.
+        LOOP AT gt_view_invoice ASSIGNING FIELD-SYMBOL(<inv>).
+          CLEAR get_group_num.
+          ASSIGN gt_group[ doc_typ = c_sinv
+                           doc_no  =  <inv>-vbeln  ] TO <g>.
+          IF <g> IS ASSIGNED.
+            get_group_num = <g>-group.
+            UNASSIGN <g>.
+          ENDIF.
+          IF get_group_num = 0.
+            CONTINUE.
+          ENDIF.
+          IF me->gi_block_if_needed( iv_cat = gc_cat_sinv
+                                     iv_id  = <inv>-vbeln ) = abap_false.
+            READ TABLE gt_doc_output_types ASSIGNING FIELD-SYMBOL(<fs_map_si>) WITH KEY doc_key = lv_key_si BINARY SEARCH.
+            IF <fs_map_si> IS ASSIGNED AND  <fs_map_si>-output_type IS NOT INITIAL.
+              CLEAR gs_alv.
+              gs_alv-check_box = gc_x.
+              gs_alv-document  = me->build_filename(
+                                   iv_doc_category = gc_cat_sinv
+                                   iv_docnum       = <inv>-vbeln ).
+              gs_alv-group     = |{ text-011 }{ get_group_num }|.
+
+              gs_alv-doc_cat   = gc_cat_sinv.
+              gs_alv-doc_id    = |{  <inv>-vbeln ALPHA = IN }|.
+
+              APPEND gs_alv TO gt_alv.
+              UNASSIGN <fs_map_si>.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+      IF <inv> IS ASSIGNED.
+        UNASSIGN <inv>.
+      ENDIF.
+      IF cb_prfin = abap_true AND gt_view_proforma IS NOT INITIAL.
+        DATA(lv_key_pf) = |{ gc_cat_prfin }{ gc_sep }{ p_vkorg }|.
+        LOOP AT gt_view_proforma ASSIGNING FIELD-SYMBOL(<prf>).
+          CLEAR get_group_num.
+          ASSIGN gt_group[ doc_typ = c_pro
+                           doc_no  =  <prf>-vbeln  ] TO <g>.
+          IF <g> IS ASSIGNED.
+            get_group_num = <g>-group.
+            UNASSIGN <g>.
+          ENDIF.
+          IF get_group_num = 0.
+            CONTINUE.
+          ENDIF.
+
+
+          IF me->gi_block_if_needed( iv_cat = gc_cat_prfin
+                                     iv_id  = <prf>-vbeln ) = abap_false.
+
+            READ TABLE gt_doc_output_types ASSIGNING FIELD-SYMBOL(<fs_map_pf>) WITH KEY doc_key = lv_key_pf BINARY SEARCH.
+            IF  <fs_map_pf> IS ASSIGNED AND <fs_map_pf>-output_type IS NOT INITIAL.
+
+
+              CLEAR gs_alv.
+              gs_alv-check_box = gc_x.
+              gs_alv-document  = me->build_filename(
+                                   iv_doc_category = gc_cat_prfin
+                                   iv_docnum       = <prf>-vbeln ).
+              gs_alv-group     = |{ text-011 }{ get_group_num }|.
+
+              gs_alv-doc_cat   = gc_cat_prfin.
+              gs_alv-doc_id    = | { <prf>-vbeln  ALPHA = IN }|.
+              APPEND gs_alv TO gt_alv.
+              UNASSIGN <fs_map_pf>.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+    ENDIF.
+
+    IF <prf> IS ASSIGNED.
+      UNASSIGN <prf>.
+    ENDIF.
+
+    SORT gt_alv BY group document.
+  ENDMETHOD.
+*BOI by Ragni Chandrawanshi on 27Feb2026
+  METHOD get_text_name.
+    DATA: lv_name TYPE zxysvarv-name.
+    CONSTANTS: lc_sub_name  TYPE tdobname VALUE 'ZMAILOUTOBJ',
+               lc_body_name TYPE tdobname VALUE 'ZMAILOUTBODY',
+               lc_sub       TYPE zxysvarv-name VALUE 'OBJECT_TEXT_',
+               lc_body      TYPE zxysvarv-name VALUE 'BODY_TEXT_'.
+
+    IF iv_type EQ gc_sub.
+      lv_name = lc_sub && p_vkorg.
+      ev_name = lc_sub_name.
+    ELSEIF iv_type EQ gc_body.
+      lv_name = lc_body && p_vkorg.
+      ev_name = lc_body_name.
+    ENDIF.
+*If entry found from below FM, then EV_NAME will set with that value
+*else, it will be default value assigned above
+    CALL FUNCTION 'ZXUN_GET_PARAMETER_YSVARV'
+      EXPORTING
+        i_progname      = gc_progname
+        i_name          = lv_name
+      IMPORTING
+        p_result        = ev_name
+      EXCEPTIONS
+        wrong_type      = 1
+        wrong_value     = 2
+        inchoerent_type = 3
+        OTHERS          = 4.
+
+    IF sy-subrc IS NOT INITIAL.
+      CLEAR ev_name.
+    ENDIF.
+  ENDMETHOD.
+*BOI by Ragni Chandrawanshi on 27Feb2026
+ENDCLASS.
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0100  OUTPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'ZPF_DOC' EXCLUDING 'MENUBAR'.
+  SET TITLEBAR 'PRV'.
+  DATA: lt_exclude   TYPE ui_functions.
+
+  CLEAR lt_exclude.
+
+  APPEND cl_gui_alv_grid=>mc_fc_loc_insert_row TO lt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_loc_append_row TO lt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_loc_paste TO lt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_loc_paste_new_row TO lt_exclude.
+  APPEND cl_gui_alv_grid=>mc_fc_loc_cut           TO lt_exclude. " Cut
+  APPEND cl_gui_alv_grid=>mc_fc_loc_delete_row    TO lt_exclude. " Delete row
+  APPEND cl_gui_alv_grid=>mc_fc_loc_copy_row      TO lt_exclude. " Duplicate / Copy row
+
+
+  CLEAR gs_layout.
+  gs_layout-zebra = abap_true.
+  gs_layout-cwidth_opt = abap_true.
+  CALL METHOD g_grid->set_table_for_first_display
+    EXPORTING
+      is_layout            = gs_layout
+      it_toolbar_excluding = lt_exclude
+    CHANGING
+      it_outtab            = gt_alv
+      it_fieldcatalog      = gt_fcat.
+*  ENDIF.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0100 INPUT.
+
+  DATA lt_selected TYPE STANDARD TABLE OF ty_alv .
+  DATA lt_attach TYPE zattachement_tt.
+  DATA:ls_att     TYPE zattachement,
+       lv_subject TYPE so_obj_des,
+
+       lv_size    TYPE i.
+  DATA: lt_body         TYPE bcsy_text,
+        lv_subject_base TYPE string,
+        lv_body_text    TYPE string,
+        lt_obj          TYPE bcsy_text.
+  DATA(lv_key) = VALUE string( ).
+  DATA: lv_ok    TYPE abap_bool,
+        lv_sname TYPE tdobname,
+        lv_bname TYPE tdobname.
+
+  CASE sy-ucomm.
+    WHEN 'EXIT' OR 'BACK' OR 'CANCEL'.
+      LEAVE TO SCREEN 0.
+
+    WHEN 'SEND'.
+      IF ( cb_dlvnt = abap_true OR cb_pklst = abap_true )" OR cb_cmr = abap_true )
+        AND gt_view_delivery IS NOT INITIAL.
+        lo_main->preload_mkpf_for_deliveries( EXPORTING it_delivery = gt_view_delivery ).
+      ENDIF.
+
+      IF ( cb_sinv = abap_true OR cb_prfin = abap_true )
+           AND gt_view_invoice  IS NOT INITIAL.
+        lo_main->preload_bkpf_for_billings( EXPORTING it_billing  = gt_view_invoice  ).
+      ENDIF.
+
+      DATA(lo_email) = NEW zcl_email_sender( ).
+      IF g_grid IS BOUND.
+        CALL METHOD g_grid->check_changed_data.
+      ENDIF.
+
+      CLEAR:lt_selected.
+      LOOP AT gt_alv ASSIGNING FIELD-SYMBOL(<fs_alv>) WHERE check_box = gc_x.
+        APPEND <fs_alv> TO lt_selected.
+      ENDLOOP.
+      IF <fs_alv> IS ASSIGNED.
+        UNASSIGN <fs_alv>.
+      ENDIF.
+      IF lt_selected IS INITIAL.
+        MESSAGE i053(zs_mtc_sd).
+        RETURN.
+      ENDIF.
+
+      SORT lt_selected BY group doc_cat doc_id document.
+      DELETE ADJACENT DUPLICATES FROM lt_selected COMPARING group doc_cat doc_id document.
+
+*      DATA(lo_main) = NEW lcl_main( ).
+      CLEAR:lt_body,lv_subject_base,lt_obj, lv_bname, lv_sname.
+      lo_main->get_text_name( EXPORTING iv_type = gc_sub "++@@Added by Ragni Chandrawanshi on 03Mar2026
+                              IMPORTING ev_name = lv_sname )."++@@Added by Ragni Chandrawanshi on 27Feb2026
+      lo_main->get_text_name( EXPORTING iv_type = gc_body "++@@Added by Ragni Chandrawanshi on 03Mar2026
+                              IMPORTING ev_name = lv_bname )."++@@Added by Ragni Chandrawanshi on 27Feb2026
+      lo_main->get_so10_text( EXPORTING iv_name = lv_bname "'ZMAILOUTBODY' "++@@Modified by Ragni Chandrawanshi on 03Mar2026
+                              IMPORTING et_text = lt_body ).
+      lo_main->get_so10_text( EXPORTING iv_name = lv_sname "'ZMAILOUTOBJ' "++@@Modified by Ragni Chandrawanshi on 27Feb2026
+                              IMPORTING et_text = lt_obj ).
+      lv_subject_base = lo_main->bcsy_to_string( lt_obj ).
+
+      LOOP AT lt_selected INTO DATA(ls_row)
+           GROUP BY ( grp = ls_row-group ) ASCENDING ASSIGNING FIELD-SYMBOL(<grp>).
+
+        CLEAR: lt_attach, lv_subject.
+        lv_subject = lv_subject_base.
+
+        DATA(lv_grp_txt) = COND string( WHEN <grp>-grp IS INITIAL THEN `N/A` ELSE <grp>-grp ).
+        LOOP AT GROUP <grp> ASSIGNING FIELD-SYMBOL(<gdoc>).
+
+          CLEAR:lv_key.
+
+          CASE <gdoc>-doc_cat.
+            WHEN gc_cat_dlvn.
+              lv_key = |{ gc_cat_dlvn }{ gc_sep }{ p_vkorg }|.
+            WHEN gc_cat_pklst.
+              lv_key = |{ gc_cat_pklst }{ gc_sep }{ p_vkorg }|.
+            WHEN gc_cat_sinv.
+              lv_key = |{ gc_cat_billdoc }{ gc_sep }{ p_vkorg }|.
+            WHEN gc_cat_prfin.
+              lv_key = |{ gc_cat_prfin }{ gc_sep }{ p_vkorg }|.
+            WHEN gc_cat_shprq.
+              lv_key = |{ gc_cat_shprq }{ gc_sep }{ p_tplst }|.
+            WHEN gc_cat_ldlst.
+              lv_key = |{ gc_cat_ldlst }{ gc_sep }{ p_tplst }|.
+            WHEN OTHERS.
+              CONTINUE.
+          ENDCASE.
+
+          CLEAR:ls_att.
+          ls_att = lo_main->generate_attachment(
+                   EXPORTING iv_docnum       = <gdoc>-doc_id
+                             iv_doc_category = <gdoc>-doc_cat
+                             iv_key          = lv_key
+                   IMPORTING ev_size         = lv_size
+                 ).
+          IF ls_att-content IS INITIAL OR lv_size <= 0.
+            CONTINUE. " skip invalid attachment
+          ENDIF.
+
+          APPEND ls_att TO lt_attach.
+
+        ENDLOOP.
+
+        UNASSIGN <gdoc>.
+
+
+        IF lo_email IS BOUND.
+          CLEAR:lv_ok.
+
+          IF lt_attach IS INITIAL.
+            MESSAGE i052(zs_mtc_sd) WITH lv_grp_txt.
+            CONTINUE.
+          ENDIF.
+
+          lv_ok = lo_email->send_email(
+                         iv_subject       = lv_subject
+                           it_body          = lt_body
+                           iv_sender        = p_sender
+                           iv_recipients    = lo_main->csv_from_sels( s_rcv[] )
+                           iv_cc            = lo_main->csv_from_sels( s_cc[] )
+                           iv_doc_type      = 'RAW'
+                           iv_delimiter     = ';'
+                           iv_attachment_type = 'PDF'
+                           it_attachments   = lt_attach ).
+
+          IF lv_ok = abap_true.
+*            MESSAGE i051(zs_mtc_sd) DISPLAY LIKE 'S' WITH lv_grp_txt .
+            MESSAGE s051(zs_mtc_sd)  .
+
+          ELSE.
+            MESSAGE i050(zs_mtc_sd) DISPLAY LIKE gc_e WITH lv_grp_txt.
+            CONTINUE.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      IF <grp> IS ASSIGNED.
+        UNASSIGN <grp>.
+      ENDIF.
+
+    WHEN 'PREVIEW'.
+
+      DATA lr_outlook     TYPE ole2_object.
+      DATA lr_mail        TYPE ole2_object.
+      DATA lr_attachments TYPE ole2_object.
+
+      DATA lt_path  TYPE STANDARD TABLE OF string .
+      DATA:lv_to TYPE string,
+           lv_cc TYPE string.
+
+      IF ( cb_dlvnt = abap_true OR cb_pklst = abap_true )" OR cb_cmr = abap_true )
+              AND gt_view_delivery IS NOT INITIAL.
+        lo_main->preload_mkpf_for_deliveries( EXPORTING it_delivery = gt_view_delivery ).
+      ENDIF.
+
+      IF ( cb_sinv = abap_true OR cb_prfin = abap_true )
+           AND gt_view_invoice  IS NOT INITIAL.
+        lo_main->preload_bkpf_for_billings( EXPORTING it_billing  = gt_view_invoice  ).
+      ENDIF.
+
+      IF g_grid IS BOUND.
+        CALL METHOD g_grid->check_changed_data.
+      ENDIF.
+
+      CLEAR:lt_selected.
+      LOOP AT gt_alv ASSIGNING <fs_alv> WHERE check_box = gc_x.
+        APPEND <fs_alv> TO lt_selected.
+      ENDLOOP.
+      UNASSIGN <fs_alv>.
+      IF lt_selected IS INITIAL.
+        MESSAGE i053(zs_mtc_sd).
+        RETURN.
+      ENDIF.
+
+      DATA(lv_base_dir) = p_dlpath.
+      CONDENSE lv_base_dir.
+      IF lv_base_dir IS INITIAL.
+
+        CALL METHOD cl_gui_frontend_services=>directory_browse
+          CHANGING
+            selected_folder      = lv_base_dir
+          EXCEPTIONS
+            cntl_error           = 1
+            error_no_gui         = 2
+            not_supported_by_gui = 3
+            OTHERS               = 4.
+        IF sy-subrc <> 0.
+          MESSAGE ID sy-msgid TYPE gc_i  NUMBER sy-msgno DISPLAY LIKE gc_e
+                     WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+          RETURN.
+        ENDIF.
+
+      ENDIF.
+      CLEAR:lt_body,lt_obj,lv_subject_base,lv_body_text, lv_bname, lv_sname.
+      lo_main->get_text_name( EXPORTING iv_type = gc_sub "++@@Added by Ragni Chandrawanshi on 03Mar2026
+                             IMPORTING ev_name = lv_sname )."++@@Added by Ragni Chandrawanshi on 27Feb2026
+      lo_main->get_text_name( EXPORTING iv_type = gc_body "++@@Added by Ragni Chandrawanshi on 03Mar2026
+                              IMPORTING ev_name = lv_bname )."++@@Added by Ragni Chandrawanshi on 03Mar2026
+      lo_main->get_so10_text( EXPORTING iv_name = lv_bname "'ZMAILOUTBODY' "++@@Added by Ragni Chandrawanshi on 03Mar2026
+                              IMPORTING et_text = lt_body ).
+      lo_main->get_so10_text( EXPORTING iv_name = lv_sname  "'ZMAILOUTOBJ' "++@@Modified by Ragni Chandrawanshi on 27Feb2026
+                              IMPORTING et_text = lt_obj  ).
+      lv_subject_base = lo_main->bcsy_to_string( lt_obj ).
+      LOOP AT lt_body ASSIGNING FIELD-SYMBOL(<fs_line>).
+        DATA(lv_line) = CONV string( <fs_line>-line ).
+        IF lv_body_text IS INITIAL.
+          lv_body_text = lv_line.
+        ELSE.
+          lv_body_text = lv_body_text && cl_abap_char_utilities=>cr_lf && lv_line.
+        ENDIF.
+      ENDLOOP.
+
+      IF <fs_line> IS ASSIGNED.
+        UNASSIGN <fs_line>.
+      ENDIF.
+
+      CLEAR:lv_to,lv_cc.
+      lv_to = lo_main->csv_from_sels( s_rcv[] ).
+      lv_cc = lo_main->csv_from_sels( s_cc[] ).
+
+      SORT lt_selected BY group doc_cat doc_id document.
+      DELETE ADJACENT DUPLICATES FROM lt_selected COMPARING group doc_cat doc_id document.
+
+
+      LOOP AT lt_selected INTO ls_row
+           GROUP BY ( grp = ls_row-group ) ASCENDING
+           ASSIGNING <grp>.
+        CLEAR:lt_path,lv_subject.
+        lv_subject = lv_subject_base.
+
+        " Build attachments only from the checked lines of this group
+        LOOP AT GROUP <grp> ASSIGNING <gdoc>.
+
+          CLEAR:lv_key.
+          CASE <gdoc>-doc_cat.
+            WHEN gc_cat_dlvn.
+              lv_key = |{ gc_cat_dlvn }{ gc_sep }{ p_vkorg }|.
+            WHEN gc_cat_pklst.
+              lv_key = |{ gc_cat_pklst }{ gc_sep }{ p_vkorg }|.
+            WHEN gc_cat_sinv.
+              lv_key = |{ gc_cat_billdoc }{ gc_sep }{ p_vkorg }|.
+            WHEN gc_cat_prfin.
+              lv_key = |{ gc_cat_prfin }{ gc_sep }{ p_vkorg }|.
+            WHEN gc_cat_shprq.
+              lv_key = |{ gc_cat_shprq }{ gc_sep }{ p_tplst }|.
+            WHEN gc_cat_cmr.
+              lv_key = |{ gc_cat_cmr }{ gc_sep }{ p_vkorg }|.
+            WHEN gc_cat_ldlst.
+              lv_key = |{ gc_cat_ldlst }{ gc_sep }{ p_tplst }|.
+            WHEN OTHERS.
+              CONTINUE.
+          ENDCASE.
+
+          CLEAR ls_att.
+          ls_att  = lo_main->generate_attachment(
+                            EXPORTING iv_docnum       = <gdoc>-doc_id
+                                      iv_doc_category = <gdoc>-doc_cat
+                                      iv_key          = lv_key
+                            IMPORTING ev_size         = lv_size ).
+
+
+          IF ls_att-content IS INITIAL OR lv_size <= 0.
+            CONTINUE.
+          ENDIF.
+
+          DATA(lv_name) = lo_main->build_filename(
+                            iv_doc_category = <gdoc>-doc_cat
+                            iv_docnum       = <gdoc>-doc_id ).
+          DATA(lv_full) = lo_main->build_fullpath(
+                            iv_dir  = lv_base_dir
+                            iv_name = lv_name ).
+
+
+          CALL METHOD cl_gui_frontend_services=>gui_download
+            EXPORTING
+              bin_filesize            = lv_size
+              filename                = lv_full
+              filetype                = 'BIN'
+            CHANGING
+              data_tab                = ls_att-content
+            EXCEPTIONS
+              file_write_error        = 1
+              no_batch                = 2
+              gui_refuse_filetransfer = 3
+              invalid_type            = 4
+              no_authority            = 5
+              unknown_error           = 6
+              header_not_allowed      = 7
+              separator_not_allowed   = 8
+              filesize_not_allowed    = 9
+              header_too_long         = 10
+              dp_error_create         = 11
+              dp_error_send           = 12
+              dp_error_write          = 13
+              unknown_dp_error        = 14
+              access_denied           = 15
+              dp_out_of_memory        = 16
+              disk_full               = 17
+              dp_timeout              = 18
+              file_not_found          = 19
+              dataprovider_exception  = 20
+              control_flush_error     = 21
+              not_supported_by_gui    = 22
+              error_no_gui            = 23
+              OTHERS                  = 24.
+          IF sy-subrc <> 0.
+
+            MESSAGE ID sy-msgid TYPE gc_i  NUMBER sy-msgno DISPLAY LIKE gc_e
+                    WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+
+          ELSE.
+            APPEND lv_full TO lt_path.
+          ENDIF.
+
+        ENDLOOP.
+        UNASSIGN <gdoc>.
+
+        "
+        IF lt_path IS INITIAL.
+          CONTINUE.
+        ENDIF.
+
+        CREATE OBJECT lr_outlook 'Outlook.Application'.
+        CLEAR lr_mail.
+        CALL METHOD OF lr_outlook 'CreateItem' = lr_mail
+          EXPORTING #1 = 0.
+        SET PROPERTY OF lr_mail 'To' = lv_to.
+        SET PROPERTY OF lr_mail 'CC' = lv_cc.
+
+        SET PROPERTY OF lr_mail 'Subject' = lv_subject.
+        SET PROPERTY OF lr_mail 'Body'    = lv_body_text.
+        IF p_sender IS NOT INITIAL.
+          SET PROPERTY OF lr_mail 'SentOnBehalfOfName' = p_sender.
+        ENDIF.
+
+        CALL METHOD OF lr_mail 'Attachments' = lr_attachments.
+        LOOP AT lt_path ASSIGNING FIELD-SYMBOL(<path>).
+          CALL METHOD OF lr_attachments 'Add' EXPORTING #1 = <path>.
+        ENDLOOP.
+        UNASSIGN <path>.
+
+        CALL METHOD OF lr_mail 'Display'.
+        FREE OBJECT lr_mail.
+
+      ENDLOOP.
+      UNASSIGN <grp>.
+
+      FREE OBJECT lr_outlook.
+
+  ENDCASE.
+ENDMODULE.
+
