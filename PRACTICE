@@ -1,2 +1,13 @@
 CREATE A OBJECT FOR BADI BY SAP:
 GET BADI THEN OBJECT NAME - GET BADI
+
+ Explicit enhancement
+    * Explicit point & section are available at any line.
+
+    * Point - It will not give default implementation.
+
+                 - You can only add additional codes, you can't replace the existing code.
+
+    * Section - It will give default implementation
+
+		    - You can change or replace the existing code.
